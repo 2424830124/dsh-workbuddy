@@ -23,6 +23,7 @@ const registrations = []
 const commands = []
 const apiRoutes = []
 const injected = []
+const subscriptions = []
 let disposer
 
 const credentials = new Map()
@@ -42,6 +43,12 @@ const ctx = {
     resolve: async (ref) => (credentials.has(ref) ? { value: credentials.get(ref) } : undefined),
     set: async (ref, value) => { credentials.set(ref, value) },
     unset: async (ref) => { credentials.delete(ref) }
+  },
+  // The retry log subscribes to `session/event`; the fake records the subscription
+  // so the test can drive one retry through it and check what gets logged.
+  on: (event, listener) => {
+    subscriptions.push({ event, listener })
+    return () => {}
   },
   llm: {
     /**
@@ -90,6 +97,34 @@ const providers = registrations.flatMap((entry) => entry.providers).sort()
 assert.deepEqual(providers, ['workbuddy-cn', 'workbuddy-intl'])
 assert.equal(commands.length, 1)
 assert.equal(commands[0].name, 'workbuddy')
+
+// A retry must be visible in the host log: the retry plugin only appends the
+// session event, so without this subscription a step that needed three attempts
+// looks like one that succeeded immediately.
+const retrySub = subscriptions.find((entry) => entry.event === 'session/event')
+assert.ok(retrySub, 'the plugin subscribes to session/event for the retry log')
+const logged = []
+ctx.logger.warn = (...args) => { logged.push(args.join(' ')) }
+retrySub.listener({}, {
+  type: 'llm/retry',
+  data: {
+    provider: 'workbuddy-intl',
+    retry: 2,
+    maxRetries: 5,
+    delayMs: 2100,
+    failure: { code: 'TRANSPORT', message: '上游没有给出结束原因就断开了响应' }
+  }
+})
+assert.equal(logged.length, 1, 'a retry of our provider is logged')
+assert.match(logged[0], /intl/)
+assert.match(logged[0], /第 2\/5 次重试/)
+assert.match(logged[0], /TRANSPORT/)
+assert.match(logged[0], /2\.1s/)
+
+// Another provider's retries are not ours to narrate.
+retrySub.listener({}, { type: 'llm/retry', data: { provider: 'qnaigc', retry: 1, maxRetries: 5, failure: { code: 'RATE_LIMIT' } } })
+retrySub.listener({}, { type: 'assistant/message', data: {} })
+assert.equal(logged.length, 1, 'only this plugin’s providers are logged')
 
 for (const { providers: owned, adapter } of registrations) {
   const provider = owned[0]

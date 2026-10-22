@@ -84,6 +84,13 @@ test/live/          需要真实账号的在线探针与诊断脚本
   - `已通知模型拓扑变化（ctx.emit）` —— 开关等写入是否通知了 harness；
   - `<region>: 选择器读取目录 → N/M 个可选` —— 选择器**每次**读目录都会打，
     它出现在开关之后就说明客户端确实重读了（没有它 = 客户端还在用缓存）。
+- 排查"回答到一半停了"时看这两行（前者是原因，后者是补救）：
+  - `<model> 的响应在 finish_reason/[DONE] 之前中断（收到 … kB，用时 …s，…）`；
+  - `第 N/M 次重试（TRANSPORT）… 后重试` —— 重试本身由 `dsh-llm-retry` 执行，
+    我们只是把它的决定打进日志（订阅 `session/event` 的 `llm/retry`），否则重试成功时
+    外人看不出发生过什么。
+  - 想量一下上游断流频率：`node test/live/stream-cut-probe.mjs [cn|intl] [次数] [模型] [--long] [--selftest]`
+    （`--selftest` 离线自检分类；大陆版零消耗，先跑它）。
 
 ## 在线探针
 

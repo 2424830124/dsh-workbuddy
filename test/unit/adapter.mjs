@@ -182,6 +182,27 @@ const cutFinish = cutChunks.find((chunk) => chunk.type === 'finish')
 assert.equal(cutFinish.reason.kind, 'error', 'a stream cut before [DONE] must not read as a clean stop')
 assert.equal(cutFinish.reason.failure.code, 'TRANSPORT', 'the harness can retry a transport failure')
 assert.match(cutFinish.reason.failure.message, /中断/)
+// The remote's own reason is not observable, so the report has to carry the
+// circumstances: how much arrived, how long it took, and what was being written.
+assert.match(cutFinish.reason.failure.message, /收到 \d/, 'the report says how much arrived')
+assert.match(cutFinish.reason.failure.message, /用时 [\d.]+s/)
+assert.match(cutFinish.reason.failure.message, /中断时正在输出正文/)
+
+// A stream cut while a tool call was still arriving is the same kind of failure,
+// and it must not be mistaken for a budget truncation: there was no terminator.
+const cutCall = new WorkBuddyAdapter({
+  logger: { info: () => {}, warn: () => {}, error: () => {} },
+  credentials: { resolve: async () => ({ value: 'header.payload.signature' }) },
+  get: () => undefined
+}, REGIONS.cn)
+cutCall.catalog = []
+cutCall.catalogAt = Date.now()
+globalThis.fetch = async () => streamOf(
+  'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read","arguments":"{\\"path\\":\\"a"}}]}}]}\n\n'
+)
+const cutCallFinish = (await collect(cutCall)).find((chunk) => chunk.type === 'finish')
+assert.equal(cutCallFinish.reason.failure.code, 'TRANSPORT', 'a cut mid tool call is retryable, not a budget truncation')
+assert.match(cutCallFinish.reason.failure.message, /中断时正在输出工具调用/)
 
 const complete = new WorkBuddyAdapter({
   logger: { info: () => {}, warn: () => {}, error: () => {} },

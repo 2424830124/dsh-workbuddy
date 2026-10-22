@@ -267,6 +267,29 @@ export function apply(ctx) {
   }, AVAILABILITY_BOOT_DELAY_MS)
   availabilityTimer.unref?.()
 
+  /**
+   * Retry log.
+   *
+   * The retry itself belongs to `@deepseek-ai/dsh-llm-retry`, which appends
+   * `llm/retry` to the session; nothing prints it, so a step that failed three
+   * times and then succeeded looks identical to one that succeeded first try.
+   * Logging the decision keeps a truncated answer visible even when the retry
+   * hides it — which is exactly the case that used to be reported as a clean stop.
+   */
+  ctx.effect(() => {
+    const byProvider = new Map(Object.values(REGIONS).map((region) => [region.provider, region]))
+    const off = ctx.on('session/event', (_session, event) => {
+      if (event?.type !== 'llm/retry') return
+      const region = byProvider.get(event.data?.provider)
+      if (region === undefined) return
+      const failure = event.data?.failure ?? {}
+      const delay = typeof event.data?.delayMs === 'number' ? `${(event.data.delayMs / 1000).toFixed(1)}s` : '未知延迟'
+      const message = String(failure.message ?? '').replace(/\s+/g, ' ').slice(0, 200)
+      ctx.logger.warn(`[workbuddy] ${region.id}: 第 ${event.data?.retry ?? '?'}/${event.data?.maxRetries ?? '?'} 次重试（${failure.code ?? '未知'}）${message.length > 0 ? ` — ${message}` : ''}；${delay} 后重试`)
+    })
+    return () => { if (typeof off === 'function') off() }
+  }, 'dsh-workbuddy: retry log')
+
   ctx.effect(() => () => {
     ctx.logger.info(`[workbuddy] 定时器全部撤销（实例 ${instance}）`)
     clearTimeout(bootTimer)

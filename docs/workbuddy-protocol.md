@@ -242,7 +242,12 @@ data: [DONE]
 - 末帧 `finish_reason`：`stop` / `tool_calls` / `length` ✅
 - **流一定以 `data: [DONE]` 收尾**；没有它、也没有 `finish_reason` 就断流 = 连接被中途掐断
   （不是模型"决定停下"）📖。插件据此判定：这种情况必须上报 `TRANSPORT` 错误交给重试策略，
-  **绝不能**当成正常 `stop` —— 曾经因此出现"看着还没说完就结束了，也不重试"的现象 ✅（已修）
+  **绝不能**当成正常 `stop` —— 曾经因此出现"看着还没说完就结束了，也不重试"的现象 ✅（已修）。
+  判定与补救都有日志：断流时打一行带证据的告警（收到多少字节、用时多久、中断时在输出哪一类内容），
+  重试时再由插件订阅 `session/event` 的 `llm/retry` 打一行"第 N/M 次重试（TRANSPORT）… 后重试"。
+  频率实测工具：`node test/live/stream-cut-probe.mjs [cn|intl] [次数] [模型] [--long] [--selftest]`
+  （2026-10-22 实测：大陆版短问答 4/4 正常、海外版 `deepseek-v4.1-flash` 长回答 10/10 正常，
+  即断流是间歇性的，常规探测不易复现）
 - `usage`（末帧携带）：`prompt_tokens` / `completion_tokens` / `total_tokens` / `prompt_tokens_details.cached_tokens` / `completion_tokens_details.reasoning_tokens` / `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` / `credit` ✅
 
 ---

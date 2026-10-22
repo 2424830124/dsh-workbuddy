@@ -779,6 +779,14 @@ export class WorkBuddyAdapter {
     let streamEnded = false
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
+    // Evidence for the "the stream was cut" report below: how much arrived, how
+    // long it took, how long the silence before the cut was, and what was being
+    // written when it happened. The remote's own reason is not observable, so the
+    // report has to carry what *is*.
+    const startedAt = Date.now()
+    let receivedBytes = 0
+    let lastDataAt = startedAt
+    let lastDelta = '无内容'
 
     const textBlock = () => {
       let block = blocks.find((candidate) => candidate.kind === 'text')
@@ -801,6 +809,8 @@ export class WorkBuddyAdapter {
       while (!streamEnded) {
         const result = await reader.read()
         if (result.done) break
+        receivedBytes += result.value?.byteLength ?? 0
+        lastDataAt = Date.now()
         buffer += decoder.decode(result.value, { stream: true })
         let newline
         while ((newline = buffer.indexOf('\n')) !== -1) {
@@ -832,12 +842,14 @@ export class WorkBuddyAdapter {
             const block = textBlock()
             if (block.text.length === 0) yield { type: 'block-start', index: block.index, blockType: 'text' }
             block.text += delta.content
+            lastDelta = '正文'
             yield { type: 'text-delta', index: block.index, text: delta.content }
           }
           if (typeof delta?.reasoning_content === 'string' && delta.reasoning_content.length > 0) {
             const block = reasoningBlock()
             if (block.text.length === 0) yield { type: 'block-start', index: block.index, blockType: 'reasoning' }
             block.text += delta.reasoning_content
+            lastDelta = '思考'
             yield { type: 'reasoning-delta', index: block.index, text: delta.reasoning_content }
           }
           for (const call of delta?.tool_calls ?? []) {
@@ -851,6 +863,7 @@ export class WorkBuddyAdapter {
             }
             block.callId = callId
             if (typeof call.function?.name === 'string' && call.function.name.length > 0) block.name = call.function.name
+            lastDelta = '工具调用'
             const fragment = call.function?.arguments ?? ''
             block.text += fragment
             if (!block.announced) {
@@ -928,13 +941,14 @@ export class WorkBuddyAdapter {
     // the retry policy never sees a failure. It has to be an error so a truncated
     // answer is retried and, failing that, surfaced.
     if (!streamEnded && finishReason === undefined) {
-      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的响应在 finish_reason/[DONE] 之前中断，按传输错误上报（可重试）`)
+      const detail = describeCut({ receivedBytes, startedAt, lastDataAt, lastDelta })
+      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的响应在 finish_reason/[DONE] 之前中断（${detail}），按传输错误上报，可自动重试`)
       yield {
         type: 'finish',
         reason: {
           kind: 'error',
           failure: {
-            message: `${this.region.provider}: 上游在给出结束原因前中断了响应（没有 finish_reason，也没有 [DONE]）`,
+            message: `${this.region.provider}: 上游没有给出结束原因就断开了响应（${detail}；可重试的传输错误）`,
             code: 'TRANSPORT'
           }
         }
@@ -942,13 +956,14 @@ export class WorkBuddyAdapter {
       return
     }
     if (argsTruncated && !streamEnded) {
-      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的工具调用参数在传输中被截断，按传输错误上报`)
+      const detail = describeCut({ receivedBytes, startedAt, lastDataAt, lastDelta })
+      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的工具调用参数在传输中被截断（${detail}），按传输错误上报，可自动重试`)
       yield {
         type: 'finish',
         reason: {
           kind: 'error',
           failure: {
-            message: `${this.region.provider}: 工具调用的参数在传输中被截断（没有 [DONE]）`,
+            message: `${this.region.provider}: 工具调用的参数在传输中被截断（${detail}；可重试的传输错误）`,
             code: 'TRANSPORT'
           }
         }
@@ -977,4 +992,22 @@ export class WorkBuddyAdapter {
 
 function positiveInt(value) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
+}
+
+/**
+ * Describe a stream that ended without its terminator.
+ *
+ * The rule is deliberately mechanical: a response is complete only when it carries
+ * `finish_reason` (and the SSE stream reaches `[DONE]`) or delivers a tool call.
+ * Anything else is a cut connection, reported as a retryable `TRANSPORT` failure.
+ *
+ * Why the *remote* closed the connection is not observable from here, so the report
+ * carries what is: how much arrived, how long it took, how long the silence before
+ * the cut, and what was being written at the time.
+ */
+function describeCut({ receivedBytes, startedAt, lastDataAt, lastDelta }) {
+  const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1)
+  const silence = ((Date.now() - lastDataAt) / 1000).toFixed(1)
+  const size = receivedBytes < 1024 ? `${receivedBytes} B` : `${(receivedBytes / 1024).toFixed(1)} kB`
+  return `收到 ${size}，用时 ${elapsed}s，最后一段数据在 ${silence}s 前，中断时正在输出${lastDelta}`
 }
