@@ -53,6 +53,11 @@ test/live/          需要真实账号的在线探针与诊断脚本
    由 `test/unit/region-order.mjs` 钉住。顺序不一致会让标签在加载完成的瞬间翻转。
 6. **只有唯一判据能判定"不可用"**：发一个探测请求。目录字段、`/v2/chat/busy` 都不可靠
    （详见协议文档 §4.9）。探测形态两个部署不同，不要互相套用。
+7. **改了"选择器能选哪些模型"，必须调 `notifyModelTopology(ctx)`**（`src/topology.js`）。
+   客户端的模型目录是**缓存**的，只在收到转发事件（`llm/adapters-updated` 等）时才重读；
+   少了这一步，面板里刚关掉的模型仍会留在模型选择器里，直到用户刷新 GUI。已有的触发点：
+   `/enabled` 开关、`/import` 名单、`/models?refresh=1`、可用性探测完成、真实调用中的自学习
+   （`rememberUnusable`）。新增类似的写入路径时照做。
 
 ## 开发流程
 

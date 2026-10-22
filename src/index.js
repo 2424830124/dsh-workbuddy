@@ -23,6 +23,7 @@ import { claimDailyCheckin, runAutoClaim } from './credits.js'
 import { msUntilNextMidnight } from './http.js'
 import { readPrefs } from './model-prefs.js'
 import { REGIONS, REGION_IDS, regionList } from './regions.js'
+import { notifyModelTopology } from './topology.js'
 
 export const name = 'dsh-workbuddy'
 export const inject = ['commands', 'credentials', 'llm']
@@ -257,6 +258,8 @@ export function apply(ctx) {
         for (const verdict of result.results) counts.set(verdict.state, (counts.get(verdict.state) ?? 0) + 1)
         ctx.logger.info(`[workbuddy] ${id}: 启动可用性检测完成 ${result.results.length} 个${region.freeProbe === true ? '（零消耗）' : '（每个模型一个 token）'} — ${[...counts.entries()].map(([state, count]) => `${state} ${count}`).join(' / ')}`)
         adapter.invalidateCatalog()
+        // Verdicts decide the default on/off state, so tell the picker to re-read.
+        notifyModelTopology(ctx)
       })().catch((error) => {
         ctx.logger.warn(`[workbuddy] ${id}: 启动可用性检测失败 — ${error instanceof Error ? error.message : String(error)}`)
       })

@@ -76,6 +76,9 @@ globalThis.fetch = async (url) => {
   throw new Error(`unexpected fetch: ${target}`)
 }
 
+/** Every `llm/adapters-updated` notification the panel triggered. */
+const topologyNotices = []
+
 const ctx = {
   logger: { info: () => {}, warn: () => {}, error: () => {} },
   credentials: {
@@ -83,6 +86,10 @@ const ctx = {
     set: async (ref, value) => { store.set(ref, value) },
     unset: async (ref) => { store.delete(ref) }
   },
+  // The client's model directory only re-reads the catalog when the host says
+  // the model set changed, so every mutating route must reach this hook.
+  emit: (event) => { if (event === 'llm/adapters-updated') topologyNotices.push(Date.now()) },
+  llm: { emitAdaptersUpdated: () => { topologyNotices.push(Date.now()) } },
   get: (name) => (name === 'connection' ? { requestRejection: () => rejection } : undefined),
   webServer: {
     register: (route) => {
@@ -92,7 +99,14 @@ const ctx = {
   }
 }
 
-registerWorkbuddyApi(ctx, {})
+/** A route-mounting stand-in: the tests here never talk to a real catalog. */
+const fakeAdapter = {
+  catalogSource: 'none',
+  models: async () => [],
+  invalidateCatalog: () => {}
+}
+
+registerWorkbuddyApi(ctx, { cn: fakeAdapter })
 assert.equal(routes.length, 1)
 const route = routes[0]
 assert.equal(route.kind, 'prefix')
@@ -191,4 +205,53 @@ const unsupported = await call('POST', '/workbuddy/checkin', { region: 'intl' })
 assert.equal(unsupported.status, 200)
 assert.equal(unsupported.json.claimed, false)
 
-console.log('api.mjs: OK — routes, validation, trust fence, credits, check-in, and state payload verified')
+// ---------------------------------------------------------------------------
+// Whatever changes the set of offered models has to tell the harness, or the
+// picker keeps showing models the panel already switched off (it caches the
+// catalog until `llm/adapters-updated` arrives).
+// ---------------------------------------------------------------------------
+
+const noticesBefore = topologyNotices.length
+
+const toggled = await call('POST', '/workbuddy/enabled', { region: 'cn', id: 'hy3', enabled: false })
+assert.equal(toggled.status, 200)
+assert.equal(topologyNotices.length, noticesBefore + 1, 'switching a model off notifies the harness')
+
+const bulk = await call('POST', '/workbuddy/enabled', { region: 'cn', ids: ['hy3', 'glm-5.3'], enabled: true })
+assert.equal(bulk.status, 200)
+assert.equal(topologyNotices.length, noticesBefore + 2, 'a bulk switch notifies once')
+
+const imported = await call('POST', '/workbuddy/import?region=cn', { models: ['hy3'], from: 'test' })
+assert.equal(imported.status, 200)
+assert.equal(topologyNotices.length, noticesBefore + 3, 'importing an account list notifies the harness')
+
+const refreshed = await call('GET', '/workbuddy/models?region=cn&refresh=1')
+assert.equal(refreshed.status, 200)
+assert.equal(topologyNotices.length, noticesBefore + 4, 'a forced catalog refresh notifies the harness')
+
+// Reads must stay silent: only mutations change what the picker may offer.
+const beforeRead = topologyNotices.length
+await call('GET', '/workbuddy/models?region=cn')
+await call('GET', '/workbuddy/state')
+assert.equal(topologyNotices.length, beforeRead, 'plain reads do not notify')
+
+// A composition without the llm service (headless, or an older harness) must
+// still serve every route: the notification is an optimisation, not a dependency.
+const bareRoutes = []
+registerWorkbuddyApi({
+  logger: { info: () => {}, warn: () => {}, error: () => {} },
+  credentials: ctx.credentials,
+  get: () => undefined,
+  webServer: { register: (route) => { bareRoutes.push(route); return () => {} } }
+}, { cn: fakeAdapter })
+const bare = bareRoutes[0]
+const bareRes = makeRes()
+await bare.handler({
+  method: 'POST',
+  url: '/workbuddy/enabled',
+  headers: {},
+  async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ region: 'cn', id: 'hy3', enabled: false })) }
+}, bareRes)
+assert.equal(bareRes.statusCode, 200, 'a context without emit or llm still switches models')
+
+console.log('api.mjs: OK — routes, validation, trust fence, credits, check-in, state payload, and topology notices verified')

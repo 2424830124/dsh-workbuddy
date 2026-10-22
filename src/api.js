@@ -22,6 +22,7 @@ import { localDayKey } from './http.js'
 import { isEnabled, readPrefs, setEnabled } from './model-prefs.js'
 import { readOfficialList, writeOfficialList } from './official-list.js'
 import { REGIONS, REGION_IDS } from './regions.js'
+import { notifyModelTopology } from './topology.js'
 
 const API_PREFIX = '/workbuddy'
 const MAX_BODY_BYTES = 16 * 1024
@@ -219,7 +220,12 @@ export function registerWorkbuddyApi(ctx, adapters) {
           // The adapter's catalog is the merged one the model picker sees:
           // both live endpoints merged when they answer, otherwise the last
           // successful read from disk. `source` lets the panel say which.
-          if (url.searchParams.get('refresh') === '1') adapter.invalidateCatalog()
+          if (url.searchParams.get('refresh') === '1') {
+            adapter.invalidateCatalog()
+            // A manual refresh can change what the picker may offer, so the
+            // client's cached directory has to be told to re-read.
+            notifyModelTopology(ctx)
+          }
           const models = await adapter.models()
           const ledger = readAvailability(region.id)
           const imported = readOfficialList(region.id)
@@ -292,6 +298,9 @@ export function registerWorkbuddyApi(ctx, adapters) {
         const models = adapter === undefined ? [] : await adapter.models()
         const dead = unusableModelIds(region.id)
         const prefs = readPrefs(region.id)
+        // The picker caches its catalog until it hears this, so without the
+        // notification a model switched off here stays selectable there.
+        notifyModelTopology(ctx)
         ctx.logger.info(`[workbuddy] ${region.id}: ${reset ? '恢复默认' : (enabled ? '启用' : '停用')} ${ids.length} 个模型（${ids.length <= 3 ? ids.join(', ') : `${ids.slice(0, 3).join(', ')}…`}），手工设定 开${result.on}/关${result.off}`)
         sendJson(res, 200, {
           region: region.id,
@@ -440,6 +449,7 @@ export function registerWorkbuddyApi(ctx, adapters) {
           const result = writeOfficialList(region.id, body.models, { from: source })
           adapter?.invalidateCatalog()
           const models = adapter === undefined ? [] : await adapter.models()
+          notifyModelTopology(ctx)
           ctx.logger.info(`[workbuddy] ${region.id}: 账号名单${result.cleared === true ? '已清除' : `已导入 ${result.count} 个（其中 ${result.withMeta ?? 0} 个带元数据）`}（${source}），当前列表 ${models.length} 个`)
           sendJson(res, 200, {
             region: region.id,

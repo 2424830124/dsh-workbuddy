@@ -24,6 +24,7 @@ import { readCatalogCache, writeCatalogCache } from './catalog-cache.js'
 import { readPrefs, isEnabled } from './model-prefs.js'
 import { applyOfficialList, readOfficialList } from './official-list.js'
 import { chatRoutes } from './regions.js'
+import { notifyModelTopology } from './topology.js'
 
 const CATALOG_TTL_MS = 10 * 60_000
 const TOOL_RESULT_IMAGE_TEXT = 'Attached image(s) from tool result:'
@@ -450,12 +451,15 @@ export class WorkBuddyAdapter {
     if (/11102|service info not found/i.test(text)) {
       writeAvailability(this.region.id, [{ id: model, state: 'dead', detail: '模型不存在（11102 service info not found）', at: Date.now() }])
       this.invalidateCatalog()
+      // The verdict feeds the default on/off state, so the picker has to re-read.
+      notifyModelTopology(this.ctx)
       return
     }
     if (/11158|is not allowed for user type/i.test(text)) {
       const type = /user type \[([^\]]{0,40})\]/i.exec(text)?.[1] ?? ''
       writeAvailability(this.region.id, [{ id: model, state: 'denied', detail: `账号无权限（11158${type.length > 0 ? `，用户类型 ${type}` : ''}）`, at: Date.now() }])
       this.invalidateCatalog()
+      notifyModelTopology(this.ctx)
     }
   }
 
