@@ -104,6 +104,15 @@ const otherChosen = cn.buildBody({ model: otherFamily.id, messages: [], reasonin
 assert.equal(otherChosen.reasoning_effort, 'medium', 'other families send the selected level too')
 assert.equal(otherChosen.thinking, undefined, 'no invented thinking field outside the verified family')
 
+// Measured: for glm a request without `reasoning_effort` reasons zero characters,
+// so the fallback must cover every family that declares levels — not only
+// deepseek — and it prefers the model's own declared default.
+const silentGlm = cn.buildBody({ model: otherFamily.id, messages: [] }, otherFamily.id, otherFamily, undefined)
+assert.equal(silentGlm.reasoning_effort, 'medium', 'a level-declaring model with no selection gets its declared default')
+
+const silentStep = cn.buildBody({ model: 'step-x', messages: [] }, 'step-x', withLevels('step-x', ['low', 'medium', 'high']), undefined)
+assert.equal(silentStep.reasoning_effort, 'medium')
+
 const noLevels = cn.buildBody({ model: 'hy3', messages: [], reasoningEffort: 'high' }, 'hy3', { id: 'hy3', name: 'Hy3', input: ['text'] }, undefined)
 assert.equal(noLevels.reasoning_effort, undefined, 'a model with no declared levels gets no reasoning field')
 
@@ -148,4 +157,76 @@ assert.match(failure.message, /第 1144 位/)
 assert.match(failure.message, /自动重试/)
 assert.ok(!failure.message.includes('queue.waiting.title'), 'the raw i18n key must not reach the transcript')
 
-console.log('adapter.mjs: OK — sanitizer, body assembly, routes, and queue failure verified')
+// ---------------------------------------------------------------------------
+// How a stream ends decides whether a short answer is retried or silently kept.
+//
+// A response cut before the `[DONE]` sentinel used to read as a normal `stop`:
+// the turn ended as if the model had chosen to stop, the retry policy never saw a
+// failure, and an answer that was about to call a tool just stopped.
+// ---------------------------------------------------------------------------
+
+const streamOf = (sse) => new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+const collect = async (adapter) => {
+  const chunks = []
+  for await (const chunk of adapter.stream({
+    provider: adapter.region.provider,
+    model: 'hy3',
+    system: 'You are helpful.',
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+    signal: AbortSignal.timeout(10_000)
+  })) chunks.push(chunk)
+  return chunks
+}
+
+const cut = new WorkBuddyAdapter({
+  logger: { info: () => {}, warn: () => {}, error: () => {} },
+  credentials: { resolve: async () => ({ value: 'header.payload.signature' }) },
+  get: () => undefined
+}, REGIONS.cn)
+cut.catalog = []
+cut.catalogAt = Date.now()
+globalThis.fetch = async () => streamOf('data: {"choices":[{"delta":{"content":"我准备调用"}}]}\n\n')
+const cutChunks = await collect(cut)
+const cutFinish = cutChunks.find((chunk) => chunk.type === 'finish')
+assert.equal(cutFinish.reason.kind, 'error', 'a stream cut before [DONE] must not read as a clean stop')
+assert.equal(cutFinish.reason.failure.code, 'TRANSPORT', 'the harness can retry a transport failure')
+assert.match(cutFinish.reason.failure.message, /中断/)
+
+const complete = new WorkBuddyAdapter({
+  logger: { info: () => {}, warn: () => {}, error: () => {} },
+  credentials: { resolve: async () => ({ value: 'header.payload.signature' }) },
+  get: () => undefined
+}, REGIONS.cn)
+complete.catalog = []
+complete.catalogAt = Date.now()
+globalThis.fetch = async () => streamOf([
+  'data: {"choices":[{"delta":{"content":"好了"}}]}',
+  'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+  'data: [DONE]',
+  ''
+].join('\n\n'))
+const completeFinish = (await collect(complete)).find((chunk) => chunk.type === 'finish')
+assert.equal(completeFinish.reason.kind, 'stop', 'a normal ending still reads as stop')
+
+const budget = new WorkBuddyAdapter({
+  logger: { info: () => {}, warn: () => {}, error: () => {} },
+  credentials: { resolve: async () => ({ value: 'header.payload.signature' }) },
+  get: () => undefined
+}, REGIONS.cn)
+budget.catalog = []
+budget.catalogAt = Date.now()
+globalThis.fetch = async () => streamOf([
+  'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read","arguments":"{\\"path\\":\\"a"}}]}}]}',
+  'data: {"choices":[{"delta":{},"finish_reason":"length"}]}',
+  'data: [DONE]',
+  ''
+].join('\n\n'))
+const budgetChunks = await collect(budget)
+const budgetFinish = budgetChunks.find((chunk) => chunk.type === 'finish')
+assert.equal(budgetFinish.reason.kind, 'max-tokens', 'a complete stream that ran out of budget is still max-tokens')
+assert.ok(
+  !budgetChunks.some((chunk) => chunk.type === 'block-end' && chunk.block?.type === 'tool-call'),
+  'a tool call with truncated arguments is not handed over — it cannot be executed'
+)
+
+console.log('adapter.mjs: OK — sanitizer, body assembly, routes, queue failure, and stream endings verified')

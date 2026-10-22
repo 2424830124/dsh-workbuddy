@@ -658,21 +658,31 @@ export class WorkBuddyAdapter {
 
     // Thinking is pinned on, and there is no switch anywhere in the plugin:
     // upstream publishes `reasoning.canDisableThinking` without naming a request
-    // parameter that would act on it (protocol §4.3.1), so rather than invent one
-    // the only reasoning control is the effort level below. The explicit
-    // `thinking` field is sent where it is documented and verified (deepseek
-    // family, §4.5); other families reason by default and reject unknown fields.
+    // parameter that would act on it (protocol §4.3.1), so `reasoning_effort` is
+    // the only reasoning control. The explicit `thinking` field is sent where the
+    // official client is known to send it (deepseek family, §4.5); the other
+    // families ignore it — measured: `enabled`, `disabled` and a nonsense value
+    // all answer 200 there, so it is not a switch either.
     const isDeepSeek = model.startsWith('deepseek-')
     if (isDeepSeek) body.thinking = { type: 'enabled' }
     // `efforts` is optional: many catalog entries declare no level set, and
     // reading `Object.keys` off that `undefined` used to throw before the
     // request was even built.
     const levels = entry?.efforts === undefined ? [] : Object.keys(entry.efforts)
-    if (options.reasoningEffort !== undefined && levels.includes(options.reasoningEffort)) {
-      body.reasoning_effort = options.reasoningEffort
-    } else if (isDeepSeek && levels.length > 0) {
-      body.reasoning_effort = levels.includes('high') ? 'high' : levels[0]
-    }
+    const selected = options.reasoningEffort !== undefined && levels.includes(options.reasoningEffort)
+      ? options.reasoningEffort
+      : undefined
+    // Measured 2026-10-22 (§3.1): for the *optional*-thinking families (deepseek,
+    // glm) a request without `reasoning_effort` reasons **zero** characters — the
+    // field is what turns thinking on, and an unknown value is only rejected by
+    // deepseek. So any model that declares levels always gets one: the selection,
+    // else its declared default, else `high` when that is on the menu. Families
+    // that always think (hy3, step) declare no levels and are left alone.
+    const declaredDefault = entry?.defaultEffort !== undefined && levels.includes(entry.defaultEffort)
+      ? entry.defaultEffort
+      : undefined
+    if (selected !== undefined) body.reasoning_effort = selected
+    else if (levels.length > 0) body.reasoning_effort = declaredDefault ?? (levels.includes('high') ? 'high' : levels[0])
     return body
   }
 
@@ -893,6 +903,11 @@ export class WorkBuddyAdapter {
     for (const index of toolOrder) {
       const block = [...toolCalls.values()].find((candidate) => candidate.index === index)
       if (block === undefined || !hasUsableToolName(block.name)) continue
+      // A call whose arguments never finished arriving cannot be executed: handed
+      // over, it becomes a parse error in the transcript instead of the truncation
+      // that actually happened. It is reported as `max-tokens` below instead, so
+      // the step can be continued rather than failed.
+      if (isTruncatedArguments(block.text)) continue
       blockCount += 1
       yield {
         type: 'block-end',
@@ -901,7 +916,7 @@ export class WorkBuddyAdapter {
           type: 'tool-call',
           id: block.callId,
           name: block.name,
-          arguments: isTruncatedArguments(block.text) ? block.text : normalizeToolArguments(block.text)
+          arguments: normalizeToolArguments(block.text)
         }
       }
     }
@@ -917,13 +932,53 @@ export class WorkBuddyAdapter {
     }
 
     const argsTruncated = [...toolCalls.values()].some((block) => isTruncatedArguments(block.text))
+    // A stream that stops without the `[DONE]` sentinel was cut, not finished:
+    // upstream closed the connection mid-answer. Reporting that as a normal stop
+    // ends the turn silently — the model looks like it simply chose to stop — and
+    // the retry policy never sees a failure. It has to be an error so a truncated
+    // answer is retried and, failing that, surfaced.
+    if (!streamEnded && finishReason === undefined) {
+      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的响应在 finish_reason/[DONE] 之前中断，按传输错误上报（可重试）`)
+      yield {
+        type: 'finish',
+        reason: {
+          kind: 'error',
+          failure: {
+            message: `${this.region.provider}: 上游在给出结束原因前中断了响应（没有 finish_reason，也没有 [DONE]）`,
+            code: 'TRANSPORT'
+          }
+        }
+      }
+      return
+    }
+    if (argsTruncated && !streamEnded) {
+      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的工具调用参数在传输中被截断，按传输错误上报`)
+      yield {
+        type: 'finish',
+        reason: {
+          kind: 'error',
+          failure: {
+            message: `${this.region.provider}: 工具调用的参数在传输中被截断（没有 [DONE]）`,
+            code: 'TRANSPORT'
+          }
+        }
+      }
+      return
+    }
+    // Truncated arguments are checked before the empty-response rule: a step whose
+    // only tool call was cut short has no usable block to hand over, and calling
+    // that "empty" would hide what happened.
+    if (argsTruncated) {
+      yield { type: 'finish', reason: { kind: 'max-tokens' } }
+      return
+    }
     if (blockCount === 0) {
       yield { type: 'finish', reason: { kind: 'error', failure: { message: '模型返回了空响应', code: 'EMPTY_RESPONSE' } } }
       return
     }
     const reason = finishReason === 'tool_calls' || toolOrder.length > 0
       ? { kind: 'tool-calls' }
-      : finishReason === 'length' || argsTruncated
+      : finishReason === 'length'
         ? { kind: 'max-tokens' }
         : { kind: 'stop' }
     yield { type: 'finish', reason }
