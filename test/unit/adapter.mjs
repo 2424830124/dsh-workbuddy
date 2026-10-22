@@ -69,6 +69,44 @@ assert.equal(routes[1].endpoint, 'https://www.workbuddy.cn')
 assert.equal(intl.routes().length, 1, 'the international deployment has a single route')
 assert.equal(intl.routes()[0].endpoint, 'https://www.workbuddy.ai')
 
+// ---------------------------------------------------------------------------
+// The reasoning controls. `reasoning_effort` is a real, gateway-validated field
+// (an unknown value is refused with 11133) and it demonstrably changes how much
+// the model thinks on a task with room for it, so the body must carry the level
+// the harness selected — and nothing invented when it names no level, or names
+// one the model does not declare.
+// ---------------------------------------------------------------------------
+const withLevels = (id, levels, isDeepSeek = false) => ({
+  id,
+  name: id,
+  input: ['text'],
+  efforts: Object.fromEntries(levels.map((level) => [level, level])),
+  defaultEffort: levels[1] ?? levels[0],
+  ...(isDeepSeek ? { thinking: true } : {}),
+  official: true,
+  preset: false
+})
+
+const declared = withLevels('deepseek-v4.1-flash', ['low', 'high', 'max'], true)
+const chosen = cn.buildBody({ model: declared.id, messages: [], reasoningEffort: 'max' }, declared.id, declared, undefined)
+assert.equal(chosen.reasoning_effort, 'max', 'the selected level reaches the request')
+assert.deepEqual(chosen.thinking, { type: 'enabled' }, 'the deepseek family is pinned to thinking on')
+
+const undeclared = cn.buildBody({ model: declared.id, messages: [], reasoningEffort: 'xhigh' }, declared.id, declared, undefined)
+assert.equal(undeclared.reasoning_effort, 'high', 'a level the model does not declare falls back to high, never to the raw value')
+
+const silentDeepSeek = cn.buildBody({ model: declared.id, messages: [] }, declared.id, declared, undefined)
+assert.equal(silentDeepSeek.reasoning_effort, 'high', 'a deepseek model with no selection still asks for the default level')
+assert.deepEqual(silentDeepSeek.thinking, { type: 'enabled' })
+
+const otherFamily = withLevels('glm-5.2', ['low', 'medium', 'high'])
+const otherChosen = cn.buildBody({ model: otherFamily.id, messages: [], reasoningEffort: 'medium' }, otherFamily.id, otherFamily, undefined)
+assert.equal(otherChosen.reasoning_effort, 'medium', 'other families send the selected level too')
+assert.equal(otherChosen.thinking, undefined, 'no invented thinking field outside the verified family')
+
+const noLevels = cn.buildBody({ model: 'hy3', messages: [], reasoningEffort: 'high' }, 'hy3', { id: 'hy3', name: 'Hy3', input: ['text'] }, undefined)
+assert.equal(noLevels.reasoning_effort, undefined, 'a model with no declared levels gets no reasoning field')
+
 // A busy model answers HTTP 429 with business code 6020 and the untranslated
 // key `queue.waiting.title`; the failure must read like a queue notice and stay
 // a plain RATE_LIMIT, so the harness's own exponential backoff owns the cadence

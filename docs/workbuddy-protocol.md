@@ -176,8 +176,30 @@ POST <chatEndpoint>/v2/chat/completions
 | `tools` | 否 | OpenAI function 形态，70 个工具 / 60 KB 实测通过 ✅ |
 | `prompt_cache_key` | 否 | 服务端前缀缓存键；缺失时缓存命中恒为 0 📖 |
 | `thinking` | 否 | `{"type":"enabled"}`，deepseek 系使用 📖✅ |
-| `reasoning_effort` | 否 | `low` / `medium` / `high` / `xhigh` / `max`，取值须在该模型支持列表内 📖 |
+| `reasoning_effort` | 否 | `low` / `medium` / `high` / `xhigh` / `max`，取值须在该模型支持列表内 ✅ 网关会校验（见下） |
 | `temperature` / `stop` | 否 | 直通 ✅ |
+
+**`reasoning_effort` 是真实生效的参数**（2026-10-22 实测，海外版 `deepseek-v4.1-flash`，免费模型，
+脚本 `test/live/effort-effect.mjs`，`ROUNDS` 可重复）：
+
+1. **网关会校验它**：传一个目录里没有的值（`totally-bogus`）→ HTTP 400
+   `{"code":11133,"msg":"the request parameters were rejected by the model provider",
+   "extError":{"code":"invalid_parameter_value"}}`——说明字段确实被转发给模型服务商，不是被忽略 ✅
+2. **在一句话就能答的题上，三档看不出区别**：鸡兔同笼题 12 次采样，
+   `low` 241 字 / `high` 232 字 / `max` 214 字（单档内波动 44–81 字）——低档也会思考 200+ 字，
+   所以差距被噪声淹没。
+3. **在需要多步推理的题上，档位单调分档**（三位数推理题，各 3 次）：
+
+   | 档位 | 思考字数（均值） | 范围 | completion tokens（均值） |
+   | --- | --- | --- | --- |
+   | `low` | 982 | 674–1512 | 615 |
+   | `high` | 3605 | 1463–5759 | 1324 |
+   | `max` | 6115 | 5460–6461 | 2048（撞到 `max_tokens` 上限） |
+
+   → 档位有意义，但**题越简单越看不出来**；`max` 在难题上会一路顶到 `max_tokens`。
+
+4. **用量里有 `completion_tokens_details.reasoning_tokens`**，与思考文字数一致；免费模型返回
+   `credit: 0` ✅（这也是"免费"标签的判据之一）。
 
 **历史消息里的 `reasoning_content` 会原样回放**，服务端接受 ✅（不做回放也能跑通）。
 
