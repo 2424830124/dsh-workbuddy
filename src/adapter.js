@@ -787,6 +787,8 @@ export class WorkBuddyAdapter {
     let receivedBytes = 0
     let lastDataAt = startedAt
     let lastDelta = '无内容'
+    /** Output tokens the last usage frame reported, for the truncation log. */
+    let outputTokens
 
     const textBlock = () => {
       let block = blocks.find((candidate) => candidate.kind === 'text')
@@ -886,6 +888,7 @@ export class WorkBuddyAdapter {
             const promptTokens = data.usage.prompt_tokens ?? 0
             const cachedTokens = data.usage.prompt_tokens_details?.cached_tokens ?? data.usage.prompt_cache_hit_tokens ?? 0
             const reasoningTokens = data.usage.completion_tokens_details?.reasoning_tokens
+            outputTokens = data.usage.completion_tokens ?? 0
             yield {
               type: 'usage',
               usage: {
@@ -974,6 +977,7 @@ export class WorkBuddyAdapter {
     // only tool call was cut short has no usable block to hand over, and calling
     // that "empty" would hide what happened.
     if (argsTruncated) {
+      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的工具调用参数被输出上限截断，本步按 max-tokens 上报（harness 可续跑）`)
       yield { type: 'finish', reason: { kind: 'max-tokens' } }
       return
     }
@@ -986,6 +990,12 @@ export class WorkBuddyAdapter {
       : finishReason === 'length'
         ? { kind: 'max-tokens' }
         : { kind: 'stop' }
+    // A budget truncation looks like a complete answer to everyone downstream —
+    // this line is the only place it is distinguishable from the model choosing to
+    // stop, so it is logged even though nothing is wrong on our side.
+    if (reason.kind === 'max-tokens') {
+      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的输出达到上限，本步被截断（输出 ${outputTokens ?? '未知'} tokens）`)
+    }
     yield { type: 'finish', reason }
   }
 }
