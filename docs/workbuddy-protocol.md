@@ -201,6 +201,31 @@ POST <chatEndpoint>/v2/chat/completions
 4. **用量里有 `completion_tokens_details.reasoning_tokens`**，与思考文字数一致；免费模型返回
    `credit: 0` ✅（这也是"免费"标签的判据之一）。
 
+**不同厂商的请求结构由厂商自己校验，网关只做转发**（2026-10-22 实测，`test/live/request-structure.mjs`
+逐字段试探；免费模型优先，海外版免费档有 `deepseek-v4.1-flash` / `hy3` / `step-5-preview`）：
+
+| 变体 | deepseek-v4.1-flash | step-5-preview（阶跃） | hy3（混元） | glm-5.3-flash（智谱） |
+| --- | --- | --- | --- | --- |
+| 基线（不带档位） | 200，思考 **0 字** | 200，思考 596 字 | 200，思考 370 字 | 200，思考 **0 字** |
+| `+ reasoning_effort:"<合法档>"` | 200，思考 **261 字** | 200，447 字 | 200，502 字 | 200，思考 **337 字** |
+| `+ reasoning_effort:"totally-bogus"` | **400 `11133` 拒绝** | 200 静默忽略 | 200 静默忽略 | 200 静默忽略 |
+| `+ thinking:{type:"enabled"}` | 200，仍 0 字 | 200 | 200 | 200，35 字 |
+| `+ thinking:{type:"disabled"}` | 200 | 200，仍思考 379 字 | 200 | 200，0 字 |
+| `+ thinking:{type:"nonsense"}` | 200 | 200 | 200 | 200 |
+| `+ max_completion_tokens`（去掉 `max_tokens`） | 200 | — | 200 | 200 |
+| `+ 未知字段` | 200 | 200 | 200 | 200 |
+
+结论：
+
+1. **只有 DeepSeek 系会校验 `reasoning_effort`**（非法值 400 `11133`）；其余厂商静默忽略非法值。
+   说明网关**不做统一校验/改写**，请求体基本按原样转给各厂商自己的 API ✅
+2. **`thinking` 字段实际上不是开关**：`enabled` / `disabled` / 乱填一律 200，思考量也没跟着变
+   （glm 那次 35 字的差异在噪声范围内）。所以插件只在官方客户端确实会发的 deepseek 系带这个字段。
+3. **真正决定"思不思考"的是有没有 `reasoning_effort`**：deepseek 与 glm **不带该字段 → 思考 0 字**
+   （完全不思考）；hy3 / step 属于强制思考型（`onlyReasoning`），不带也会思考。
+   → 因此适配器对**任何声明了档位的模型**都必须带上档位（选中的，否则目录里的 `defaultEffort`，
+   再次是 `high`），这正是"思考恒为开启"的落地方式；没声明档位的模型才不带 ✅
+
 **历史消息里的 `reasoning_content` 会原样回放**，服务端接受 ✅（不做回放也能跑通）。
 
 ### 3.2 响应（SSE）
