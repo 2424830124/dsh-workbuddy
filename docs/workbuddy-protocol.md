@@ -253,7 +253,7 @@ data: [DONE]
 | `contextWindow` | 仅部分模型有：`{defaultLength, supportedLengths:[…]}`（如 step-5: `[300000, 1000000]`） |
 | `maxOutputTokens` | 输出上限 |
 | `supportsImages` / `supportsReasoning` / `supportsToolCall` / `disabledMultimodal` | 能力位 |
-| `onlyReasoning` / `canDisableThinking` | 是否强制思考 / **上游声明**"可否关闭思考"（见 §4.3.1） |
+| `onlyReasoning` / `canDisableThinking` | 是否强制思考 / 上游的"可否关闭思考"声明 —— **插件忽略它**，理由见 §4.3.1 |
 | `reasoning` | `{effort, summary, defaultEffort, supportedEfforts:[…]}`；`effort` 是默认档，`supportedEfforts` 才是可选集合 |
 | `relatedModels` | 关联模型映射，如 `{lite, reasoning, builtin-lite}` |
 | `credits` | 倍率字符串，如 `"x0.00 credits"` / `"x2.20 credits"` / `"x0.05"` |
@@ -263,26 +263,30 @@ data: [DONE]
 | `iconUrl` / `iconUrl_en` | 图标（base64 data-URI 或 HTTPS URL，按语言选） |
 | `AccountAttributes` ❓ | 出现在积分包里，模型侧未见 |
 
-#### 4.3.1 `canDisableThinking` 是"实时声明"，且上游没有给关闭参数（2026-10-22 实测）
+#### 4.3.1 `canDisableThinking`：上游没给关闭参数，插件选择"忽略它、思考恒开"（2026-10-22 实测）
 
-三个结论都有原始响应与缓存对比支撑（`node test/live/reasoning-audit.mjs [cn|intl]`）：
+三条结论都有原始响应与缓存对比支撑（`node test/live/reasoning-audit.mjs [cn|intl]`）：
 
 1. **上游只发一个布尔位，不发参数名。** `reasoning` 块出现过的字段只有
    `canDisableThinking` / `defaultEffort` / `effort` / `summary` / `supportedEfforts`；
    整条记录里像"开关"的字段只有 `canDisableThinking` 和 `disabledMultimodal`（后者是
-   多模态能力，与思考无关）。也就是说：**"能不能关"是知道的，"怎么关"上游没说。**
-   本插件在请求里给 deepseek 系发的是 `thinking:{type:'enabled'}`（§4.5 表），
-   反向参数（关闭）**尚未验证**，候选：`thinking:{type:'disabled'}`、
-   `enable_thinking:false`、`reasoning:{effort:'none'}` —— 要确认必须发一次真实请求看
-   回复里还有没有 `reasoning_content`（大陆版一次探测级别的花费）。
-2. **两个部署各自独立声明。** 同一天里：大陆版对 `glm-5.2`、`kimi-k3-1`、
-   `deepseek-v4-flash`、`deepseek-v4-pro`、`hy3` **完全不发**该字段，而海外版对同样的 id
-   一律发 `true`/`false`。谁都不是"错"的 —— 它们是两套网关、两套目录，所以面板按当前
-   部署各自的目录显示，不做跨部署统一。
-3. **字段会消失，所以不能进缓存。** 大陆版对这 5 个模型过去发过、现在不发了；缓存是
-   追加式的（缺字段不覆盖），旧值会一直留着 → 面板曾因此宣称一个上游已不再声明的能力。
-   现在 `credits`、`promotion`、`canDisableThinking` 三者都在 `VOLATILE_FIELDS` 里：
-   写时不落盘、读时丢弃，缺失就显示「未知」。
+   多模态能力，与思考无关）。也就是说：**"能不能关"它说了，"怎么关"它没说。**
+   反向参数（`thinking:{type:'disabled'}` / `enable_thinking:false` /
+   `reasoning:{effort:'none'}` 之类）**一个都没验证过**。
+2. **两个部署各自独立声明，而且会变。** 同一天里：大陆版对 `glm-5.2`、`kimi-k3-1`、
+   `deepseek-v4-flash`、`deepseek-v4-pro`、`hy3` **完全不发**该字段，海外版对同样的 id
+   一律发 `true`/`false`；大陆版过去发过、现在不发了 —— 说明它不是稳定契约。
+3. **插件的决定：忽略这个字段，思考恒开。** 既然"能关"无法兑现（没有参数），就不要在
+   面板上宣称它 —— 于是：
+   - 目录解析不再读取该字段（`catalog.js`），合并、面板载荷、账号名单富化里也一并去掉；
+   - 面板详情不再有「可关闭思考」这一行（没有开关就不摆开关）；
+   - **唯一能调的仍然是档位**（`reasoning.supportedEfforts` → 低/中/高/超高/极致）；
+   - `thinking:{type:'enabled'}` 目前只对 deepseek 系发送（§4.5 表，📖✅ 已验证），
+     其它族不发这个字段（它们本身就是 `onlyReasoning` 模型，默认就在思考）；
+   - 缓存里把该字段当作**已废弃字段**处理：老快照读出来就丢掉，不再留痕。
+
+   如果将来上游给出真正的关闭参数，正确做法是把它变成一个档位（例如「关闭」）交给
+   选择器，而不是恢复一个布尔位。
 
 ### 4.3 `/v3/config` 结构
 ```json
@@ -340,7 +344,7 @@ Web 端 picker 的悬停卡片会显示简介、消耗速度、繁忙程度、�
 | 名称（含「极致」「快速」等预设名） | 目录 | `name` ✅ |
 | 简介「优先深度与准确性…」 | 目录 | `descriptionZh` / `descriptionEn`，前端按 locale 选（`zh*` → `descriptionZh`）✅ |
 | 消耗速度 `1.20x 倍率` | 目录 | `credits`，如 `"x1.20 credits"`；前端只取数字再加 `x`（`/(\d+(?:\.\d+)?)/` → `1.20x`）✅ |
-| 思考档位（低/中/高/超高/极致） | 目录 | `reasoning.supportedEfforts`（可选集合）、`reasoning.defaultEffort`、`onlyReasoning`、`canDisableThinking`、`supportsReasoning`；**档位文案是前端 i18n**（`model.effort.{low,medium,high,xhigh,max}.label` → 低/中/高/超高/极致），不是服务端下发 ✅ |
+| 思考档位（低/中/高/超高/极致） | 目录 | `reasoning.supportedEfforts`（可选集合）、`reasoning.defaultEffort`、`onlyReasoning`、`supportsReasoning`；**档位文案是前端 i18n**（`model.effort.{low,medium,high,xhigh,max}.label` → 低/中/高/超高/极致），不是服务端下发 ✅ |
 | 上下文窗口选择 | 目录 | `contextWindow.supportedLengths` + `maxInputTokens`（前端命名 `supportedContextWindows` / `defaultContextWindow`）✅ |
 | 徽章（如「限时免费」） | 目录 | `tags`，形如 `badge:限时免费:#FF0000`；另有 `isDefault`、`badges` / `tierBadges`（前端派生）✅ |
 | **繁忙程度**（空闲 / 轻微拥堵 / 极度拥堵 / 不可用） | **`POST /v2/chat/busy`** | 见下 ✅ |

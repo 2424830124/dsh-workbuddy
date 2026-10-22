@@ -50,7 +50,6 @@ const intlModels = [
     maxTokens: '64k',
     input: '文本 + 图像',
     efforts: 'low / high',
-    canDisableThinking: '是',
     description: '腾讯混元最新一代快思考模型，响应快、成本低，适合日常问答与轻量编码。'
   },
   { id: 'hy4-preview', name: 'Hy4 preview', enabled: true, credits: '0.29x', state: 'ok', busy: '繁忙', busyTone: 'wb-tag-warn' },
@@ -101,7 +100,6 @@ const details = (model) => `<div class="wb-model-detail">
       ${detailRow('最大输出', model.maxTokens)}
       ${detailRow('模态', model.input === undefined ? undefined : tags(model.input.split(' + '), ' wb-tag-accent'))}
       ${detailRow('思考档位', model.efforts === undefined ? undefined : tags(model.efforts.split(' / ')))}
-      ${detailRow('可关闭思考', model.canDisableThinking)}
       ${detailRow('倍率', model.free === true ? tag('免费', ' wb-tag-accent') : (model.credits === undefined ? '未知' : model.credits))}
       ${detailRow('繁忙', model.busy === undefined ? undefined : tag(model.busy, ` ${model.busyTone ?? 'wb-tag-ok'}`))}
       ${detailRow('促销类型', model.promo === undefined ? undefined : `<span class="wb-tag" style="background:#e5484d1f;color:#e5484d">${model.promo}</span>`)}

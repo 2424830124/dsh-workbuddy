@@ -199,7 +199,11 @@ export function entryFromMeta(id, meta) {
     input: meta?.supportsImages === true ? ['text', 'image'] : ['text'],
     ...(levels.length === 0 ? {} : { efforts: Object.fromEntries(levels.map((level) => [level, level])) }),
     ...(declared === undefined ? {} : { defaultEffort: declared }),
-    ...(reasoning?.canDisableThinking === undefined ? {} : { canDisableThinking: reasoning.canDisableThinking === true }),
+    // `reasoning.canDisableThinking` is deliberately ignored. Upstream publishes
+    // the flag without naming any parameter that would act on it (measured
+    // 2026-10-22, protocol §4.3.1), and it also stops sending the flag for models
+    // it used to describe, so the plugin pins thinking on instead of advertising a
+    // switch it cannot honour. The effort level is the only reasoning control.
     ...(id.startsWith('deepseek-') ? { thinking: true } : {}),
     // `/v3/config` publishes which tier a model needs; that is a free, static
     // entitlement signal (see `account-info.js`), so it is carried along.
@@ -306,7 +310,6 @@ export function mergeEntries(entries, extra) {
       ...(entry.contextWindow === undefined && other.contextWindow !== undefined ? { contextWindow: other.contextWindow } : {}),
       ...(entry.maxTokens === undefined && other.maxTokens !== undefined ? { maxTokens: other.maxTokens } : {}),
       ...(entry.defaultEffort === undefined && other.defaultEffort !== undefined ? { defaultEffort: other.defaultEffort } : {}),
-      ...(entry.canDisableThinking === undefined && other.canDisableThinking !== undefined ? { canDisableThinking: other.canDisableThinking } : {}),
       ...(entry.promotion === undefined && other.promotion !== undefined ? { promotion: other.promotion } : {}),
       ...(levels.length === 0 ? {} : { efforts: Object.fromEntries(levels.map((level) => [level, level])) }),
       // `official` is only ever set by the account-scoped payload (see

@@ -132,7 +132,7 @@ export function writeOfficialList(regionId, models, options = {}) {
  * current. A model whose rate cannot be read right now reads 「未知」 — which is
  * why the console capture keeps the other fields only.
  */
-const ENRICHABLE = ['name', 'descriptionZh', 'descriptionEn', 'contextWindow', 'maxTokens', 'defaultEffort', 'canDisableThinking', 'requiredUserType']
+const ENRICHABLE = ['name', 'descriptionZh', 'descriptionEn', 'contextWindow', 'maxTokens', 'defaultEffort', 'requiredUserType']
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 

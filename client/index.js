@@ -106,8 +106,6 @@ window.__ModuleLoader__.load({
         detailRate: '倍率',
         detailDescription: '描述',
         detailModality: '模态',
-        detailCanDisableThinking: '可关闭思考',
-        detailNo: '否',
         freeModel: '免费',
         promoDiscount: '折扣',
         detailPromoKind: '促销类型',
@@ -120,7 +118,6 @@ window.__ModuleLoader__.load({
         busyBusyOfficial: '轻微拥堵',
         busyCongestedOfficial: '极度拥堵',
         busyUnknown: '未知',
-        detailYes: '是',
         modalityText: '文本',
         modalityImage: '图像',
         noModels: '登录后这里会显示该账号可用的模型'
@@ -193,8 +190,6 @@ window.__ModuleLoader__.load({
         detailRate: 'Rate',
         detailDescription: 'Description',
         detailModality: 'Modality',
-        detailCanDisableThinking: 'Thinking switch',
-        detailNo: 'no',
         freeModel: 'free',
         promoDiscount: 'discount',
         detailPromoKind: 'Promotion',
@@ -207,7 +202,6 @@ window.__ModuleLoader__.load({
         busyBusyOfficial: 'slightly congested',
         busyCongestedOfficial: 'extremely congested',
         busyUnknown: 'unknown',
-        detailYes: 'yes',
         modalityText: 'text',
         modalityImage: 'image',
         noModels: 'Models appear here once the account is signed in'
@@ -1004,9 +998,6 @@ window.__ModuleLoader__.load({
         add(t('detailEfforts'), model.efforts.length === 0
           ? undefined
           : h('span', { className: 'wb-tags' }, model.efforts.map((level) => detailTag(level))))
-        add(t('detailCanDisableThinking'), typeof model.canDisableThinking === 'boolean'
-          ? (model.canDisableThinking === true ? t('detailYes') : t('detailNo'))
-          : undefined)
         add(t('detailRate'), model.credits === undefined
           ? t('unknown')
           : (isFreeModel(model) ? detailTag(t('freeModel'), ' wb-tag-accent') : (formatRate(model.credits) ?? model.credits)))

@@ -59,10 +59,10 @@ const hy3 = cached.entries.find((entry) => entry.id === 'hy3')
 assert.equal(hy3.descriptionZh, '混元思考模型，具有增强的推理能力', 'description survives a read that omits it')
 assert.equal(hy3.descriptionEn, 'Enhanced reasoning')
 assert.equal(hy3.credits, undefined, 'the credits rate is volatile and is never cached')
-// A capability is a live statement: the China payload stopped sending this one
-// for five models on 2026-10-22, and a cache that kept the old value made the
-// panel advertise what upstream no longer said.
-assert.equal(hy3.canDisableThinking, undefined, 'a capability upstream may stop sending is never cached')
+// Retired fields must not survive in a snapshot written before they were retired:
+// `canDisableThinking` is no longer produced, and the read filter strips the copy
+// an older snapshot still holds.
+assert.equal(hy3.canDisableThinking, undefined, 'a retired field is stripped from old snapshots')
 assert.equal(hy3.promotion, undefined, 'a promotion moves with each campaign and is never cached')
 assert.equal(hy3.contextWindow, 192000, 'context window survives')
 assert.equal(hy3.maxTokens, 64000)
@@ -87,7 +87,7 @@ writeCatalogCache('cn', 'scoped', [{
 const updated = readCatalogCache('cn').entries.find((entry) => entry.id === 'hy3')
 assert.equal(updated.name, 'Hy3 (updated)', 'a supplied value wins')
 assert.equal(updated.credits, undefined, 'a rate read now is still not persisted')
-assert.equal(updated.canDisableThinking, undefined, 'a capability read now is not persisted either')
+assert.equal(updated.canDisableThinking, undefined, 'a retired field is dropped even when a read supplies it')
 assert.deepEqual(updated.efforts, { low: 'low', high: 'high', max: 'max' }, 'level sets union')
 assert.equal(updated.defaultEffort, 'max')
 assert.equal(updated.descriptionZh, '混元思考模型，具有增强的推理能力', 'still carried')

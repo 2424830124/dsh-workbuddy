@@ -656,6 +656,12 @@ export class WorkBuddyAdapter {
     const maxTokens = positiveInt(options.maxTokens) ?? entry?.maxTokens
     if (maxTokens !== undefined) body.max_tokens = maxTokens
 
+    // Thinking is pinned on, and there is no switch anywhere in the plugin:
+    // upstream publishes `reasoning.canDisableThinking` without naming a request
+    // parameter that would act on it (protocol §4.3.1), so rather than invent one
+    // the only reasoning control is the effort level below. The explicit
+    // `thinking` field is sent where it is documented and verified (deepseek
+    // family, §4.5); other families reason by default and reject unknown fields.
     const isDeepSeek = model.startsWith('deepseek-')
     if (isDeepSeek) body.thinking = { type: 'enabled' }
     // `efforts` is optional: many catalog entries declare no level set, and

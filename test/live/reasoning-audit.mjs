@@ -1,13 +1,11 @@
 /**
- * Dev probe: compare what upstream says about reasoning right now with what our
- * catalog cache claims.
+ * Dev probe: what does upstream say about reasoning right now?
  *
- * Two questions this answers with data instead of guesses:
- *   · does a deployment actually publish `canDisableThinking` for a model, and
- *   · does it publish any *parameter* that would turn thinking off?
- *
- * The cache is append-only, so a capability that upstream stopped sending can
- * survive in it; this script shows exactly which entries disagree.
+ * The plugin ignores `canDisableThinking` on purpose — upstream publishes the flag
+ * without naming any parameter that would act on it, and it stops sending the flag
+ * for models it used to describe (protocol §4.3.1). This keeps an eye on the field
+ * shapes and on which ids upstream currently describes, so the decision can be
+ * revisited with data if upstream ever publishes a real switch.
  *
  * Run: `node test/live/reasoning-audit.mjs [cn|intl]`
  */
@@ -102,28 +100,23 @@ if (live.size === 0) {
 }
 
 console.log(`=== ${region.id} — 上游 ${live.size} 个 id，缓存 ${cached.length} 条`)
-console.log('id'.padEnd(26), '上游 canDisable', '缓存 canDisable', '上游 effort/summary', '上游相关字段')
-const disagreements = []
+console.log('id'.padEnd(26), '上游 canDisable', '上游 effort/summary', '上游相关字段')
 for (const id of allIds) {
   const raw = live.get(id)
-  const entry = cacheById.get(id)
-  const liveFlag = raw?.reasoning?.canDisableThinking
-  const cachedFlag = entry?.canDisableThinking
-  if (liveFlag !== undefined || cachedFlag !== undefined) {
-    const flags = Object.keys(raw ?? {}).filter((key) => /reason|think/i.test(key)).sort()
-    console.log(
-      id.padEnd(26),
-      String(liveFlag ?? '—').padEnd(15),
-      String(cachedFlag ?? '—').padEnd(16),
-      `${raw?.reasoning?.effort ?? '—'}/${raw?.reasoning?.summary ?? '—'}`.padEnd(18),
-      flags.join(',')
-    )
-    if (liveFlag !== cachedFlag) disagreements.push({ id, liveFlag, cachedFlag })
-  }
+  if (raw?.reasoning === undefined && raw?.supportsReasoning === undefined) continue
+  const flags = Object.keys(raw).filter((key) => /reason|think/i.test(key)).sort()
+  console.log(
+    id.padEnd(26),
+    String(raw.reasoning?.canDisableThinking ?? '—').padEnd(15),
+    `${raw.reasoning?.effort ?? '—'}/${raw.reasoning?.summary ?? '—'}`.padEnd(18),
+    flags.join(',')
+  )
 }
 
-console.log(`\n不一致 ${disagreements.length} 个:`)
-for (const row of disagreements) console.log(`  ${row.id}: 上游=${row.liveFlag ?? '(未发)'} 缓存=${row.cachedFlag ?? '(无)'}`)
+// The plugin never caches the flag; a snapshot still holding it is stale data
+// that the read filter drops, and this shows whether any is left behind.
+const stale = cached.filter((entry) => entry.canDisableThinking !== undefined)
+console.log(`\n缓存里仍带 canDisableThinking 的条目: ${stale.length} 个（读取时会被丢弃）`)
 
 // Which field names upstream uses anywhere near reasoning, so a disable
 // parameter would be visible if it existed.

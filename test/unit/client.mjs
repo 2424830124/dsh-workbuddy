@@ -243,7 +243,6 @@ const models = [
     contextWindow: 192000,
     maxTokens: 64000,
     input: ['text', 'image'],
-    canDisableThinking: true,
     promotion: { label: 'Free now', color: '#e5484d', kind: 'discount', text: 'Free daily use', from: '2026-08-06T00:00:00Z', until: '2026-11-01T00:00:00Z' },
     availability: { state: 'ok', at: Date.now() },
     enabled: true,

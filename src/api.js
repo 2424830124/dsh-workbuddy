@@ -261,7 +261,6 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
               credits: entry.credits,
               efforts: entry.efforts === undefined ? [] : Object.keys(entry.efforts),
               defaultEffort: entry.defaultEffort,
-              canDisableThinking: entry.canDisableThinking,
               thinking: entry.thinking === true,
               contextWindow: entry.contextWindow,
               maxTokens: entry.maxTokens,

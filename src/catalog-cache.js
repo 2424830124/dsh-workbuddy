@@ -43,18 +43,15 @@ const MODALITY_ORDER = ['text', 'image']
  * entry therefore reports no rate at all; the panel shows 未知 rather than a
  * stale number.
  *
- * The other two are live *statements* rather than measurements, and the cache is
- * append-only (a field another read omits is never cleared), so keeping them
- * would let an old claim outlive the payload that made it:
+ * `promotion` is a live *statement* rather than a measurement, and the cache is
+ * append-only (a field another read omits is never cleared), so keeping it would
+ * let an old claim outlive the payload that made it: the deployment's
+ * `modelPromotions` block moves with each campaign, and a cached badge can
+ * advertise a promotion that ended.
  *
- * - `promotion` comes from the deployment's `modelPromotions` block, which moves
- *   with each campaign; a cached badge can advertise a promotion that ended.
- * - `canDisableThinking` is a capability each catalog read either states or
- *   stays silent about. Measured 2026-10-22: the China scoped payload stopped
- *   sending it for five models (`glm-5.2`, `kimi-k3-1`, `deepseek-v4-flash`,
- *   `deepseek-v4-pro`, `hy3`) while the overseas one kept sending it for all of
- *   them, and the cache kept the old values — the panel then claimed a
- *   capability upstream no longer advertised.
+ * `canDisableThinking` is retired — the plugin pins thinking on and never reads
+ * the flag (protocol §4.3.1). It stays in this set only so that snapshots written
+ * before the retirement drop it on read instead of leaving a dead field behind.
  */
 const VOLATILE_FIELDS = new Set(['credits', 'promotion', 'canDisableThinking'])
 
