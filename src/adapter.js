@@ -542,14 +542,16 @@ export class WorkBuddyAdapter {
     // when the user asks for it, which is how one gets tried anyway.
     const prefs = readPrefs(this.region.id)
     const dead = unusableModelIds(this.region.id)
-    return catalog
-      .filter((entry) => isEnabled(prefs, entry.id, dead.has(entry.id)))
-      .map((entry) => ({
-        provider,
-        id: entry.id,
-        name: entry.name,
-        inputModalities: [...entry.input]
-      }))
+    const offered = catalog.filter((entry) => isEnabled(prefs, entry.id, dead.has(entry.id)))
+    // Always logged: one line per picker open, and the fastest way to answer
+    // "did the picker re-read the list after that switch was flipped?".
+    this.ctx.logger.info(`[workbuddy] ${this.region.id}: 选择器读取目录 → ${offered.length}/${catalog.length} 个可选`)
+    return offered.map((entry) => ({
+      provider,
+      id: entry.id,
+      name: entry.name,
+      inputModalities: [...entry.input]
+    }))
   }
 
   /**
