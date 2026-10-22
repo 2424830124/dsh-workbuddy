@@ -353,19 +353,6 @@ node test/live/dump-stream.mjs <会话前缀> <seq,…>      # 打印那一步�
 node test/live/sampling-probe.mjs intl 4              # 同一提示在各 temperature 下的"提前 stop"率
 ```
 
-### 采样参数（默认不发，可按需覆盖）
-
-插件默认**不发送** `temperature` / `top_p` / `top_k`（harness 没暴露温度设置，`options.temperature` 实际为空），因此走上游默认采样。`stop` 本质是模型采到 EOS，偏热的默认值更容易在"现在我来改……："这种地方收尾，所以留了两个覆盖开关：
-
-```powershell
-$env:WORKBUDDY_TEMPERATURE = '0.3'
-$env:WORKBUDDY_TOP_P = '0.95'
-```
-
-优先级：**调用方显式传入的 `temperature`** > 环境变量 > 不发 ✓（默认行为对所有人不变 ✓）。改完需重启 DSH ✓。
-
-> 实测（2026-10-22，海外版免费档 `deepseek-v4.1-flash`）：一个明确要求调用工具的短提示，在"不发 / 0.2 / 0.5 / 1.0"四档各跑 4 次，**16/16 都正确调用了工具** —— 单纯温度解释不了真实会话里的提前收尾（那次输入有 213k 缓存 token，`effort=max` 却只有 0 个思考 token，更像长上下文下的例行续写）。这个开关是留给真实流量验证用的，默认不改输出风格。
-
 ## 许可
 
 MIT，见 [`LICENSE`](LICENSE)。再次说明：本项目为第三方非官方插件，与腾讯 / WorkBuddy 无关联。

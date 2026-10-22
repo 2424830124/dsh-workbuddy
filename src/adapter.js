@@ -651,20 +651,7 @@ export class WorkBuddyAdapter {
       function: { name: tool.name, description: tool.description, parameters: tool.parameters }
     }))
     if (tools !== undefined && tools.length > 0) body.tools = tools
-    // Sampling is whatever the caller asked for, else the deployment default —
-    // except for an explicit override. `stop` is the model sampling its
-    // end-of-sequence token, so on a hot default it can end a turn right after
-    // "现在我来改……：" instead of calling the tool, and nothing in the harness
-    // exposes a temperature to tune that. These two variables let an operator try a
-    // cooler profile without changing the default behaviour:
-    //   WORKBUDDY_TEMPERATURE=0.3  WORKBUDDY_TOP_P=0.95
-    // Measured 2026-10-22: a short tool-using prompt called the tool 16/16 times at
-    // the default and at 0.2/0.5/1.0, so sampling alone does not explain the early
-    // stops; the override exists to test the long-context case on real traffic.
-    const temperature = options.temperature ?? envNumber('WORKBUDDY_TEMPERATURE')
-    if (temperature !== undefined) body.temperature = temperature
-    const topP = envNumber('WORKBUDDY_TOP_P')
-    if (topP !== undefined) body.top_p = topP
+    if (options.temperature !== undefined) body.temperature = options.temperature
     if (options.stop !== undefined && options.stop.length > 0) body.stop = options.stop
     const maxTokens = positiveInt(options.maxTokens) ?? entry?.maxTokens
     if (maxTokens !== undefined) body.max_tokens = maxTokens
@@ -1038,14 +1025,6 @@ export class WorkBuddyAdapter {
 
 function positiveInt(value) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
-}
-
-/** A numeric override from the environment, or `undefined` when unset/unusable. */
-function envNumber(name) {
-  const raw = process.env[name]
-  if (typeof raw !== 'string' || raw.trim().length === 0) return undefined
-  const value = Number(raw)
-  return Number.isFinite(value) ? value : undefined
 }
 
 /**
