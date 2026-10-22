@@ -16,7 +16,7 @@
  */
 
 window.__ModuleLoader__.load({
-  id: 'dsh-workbuddy',
+  id: '@huai_xin/dsh-workbuddy',
   factory(require) {
     const report = (stage) => {
       try {

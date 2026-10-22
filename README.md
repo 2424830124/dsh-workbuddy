@@ -20,7 +20,7 @@ WorkBuddy 模型接入插件（DeepSeek Harness / DSH），同时支持两个部
 
 ```sh
 # 从 npm 安装到某个 profile（会同时把 bundle 挂进该 profile）
-dsh plugin --profile <profile> add dsh-workbuddy
+dsh plugin --profile <profile> add @huai_xin/dsh-workbuddy
 
 # 本地目录（未发布时）
 dsh plugin --profile <profile> add /path/to/dsh-workbuddy

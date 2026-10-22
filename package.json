@@ -1,5 +1,5 @@
 {
-  "name": "dsh-workbuddy",
+  "name": "@huai_xin/dsh-workbuddy",
   "version": "0.1.0",
   "description": "WorkBuddy model provider for DeepSeek Harness (international + China deployments)",
   "type": "module",
@@ -47,5 +47,13 @@
       "inject": []
     }
   },
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/2424830124/dsh-workbuddy.git"
+  },
+  "homepage": "https://github.com/2424830124/dsh-workbuddy#readme",
+  "bugs": {
+    "url": "https://github.com/2424830124/dsh-workbuddy/issues"
+  }
 }

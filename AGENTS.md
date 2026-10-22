@@ -4,7 +4,7 @@
 
 ## 这是什么
 
-`dsh-workbuddy` 是 DeepSeek Harness（DSH）的一个插件：把 **WorkBuddy** 的两个部署
+`@huai_xin/dsh-workbuddy` 是 DeepSeek Harness（DSH）的一个插件：把 **WorkBuddy** 的两个部署
 （`workbuddy-intl` 海外版 / `workbuddy-cn` 大陆版）注册成 llm provider 路由，并提供一个
 设置面板管理账号、模型开关与可用性。
 

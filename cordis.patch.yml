@@ -11,5 +11,5 @@
 
 - insert:
     - id: workbuddy
-      name: 'dsh-workbuddy'
+      name: '@huai_xin/dsh-workbuddy'
       config: {}

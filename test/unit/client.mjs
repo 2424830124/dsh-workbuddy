@@ -26,7 +26,7 @@ globalThis.window = {
 
 await import('../../client/index.js')
 assert.ok(definition, 'client.js must call window.__ModuleLoader__.load')
-assert.equal(definition.id, 'dsh-workbuddy')
+assert.equal(definition.id, '@huai_xin/dsh-workbuddy')
 
 // ---------------------------------------------------------------------------
 // A React small enough to be obviously correct, big enough to run the panel:
