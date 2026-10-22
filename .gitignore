@@ -1,0 +1,5 @@
+test/.token
+node_modules/
+*.tgz
+debug.log
+.client-log.jsonl

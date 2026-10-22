@@ -1,0 +1,15 @@
+# dsh-workbuddy bundle patch.
+#
+# One Host row. The plugin registers both llm provider routes itself:
+#
+#   workbuddy-intl → https://www.workbuddy.ai
+#   workbuddy-cn   → https://www.workbuddy.cn
+#
+# and owns their login flow. Tokens live in the credential references
+# WORKBUDDY_INTL_TOKEN / WORKBUDDY_CN_TOKEN; run
+# `/workbuddy login <intl|cn>` once per deployment.
+
+- insert:
+    - id: workbuddy
+      name: 'dsh-workbuddy'
+      config: {}

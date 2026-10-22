@@ -1,0 +1,107 @@
+/**
+ * Unit check for the availability ledger: classification of every probe answer
+ * the two gateways are known to produce, the dead-within-TTL rule, and the
+ * append-by-id merge.
+ *
+ * Run: `node test/unit/availability.mjs`
+ */
+
+import assert from 'node:assert/strict'
+import { rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+process.env.DSH_HOME = join(tmpdir(), 'dsh-workbuddy-availability-test')
+rmSync(process.env.DSH_HOME, { recursive: true, force: true })
+
+const { AVAILABILITY_TTL_MS, availabilitySummary, classifyProbe, deadModelIds, probeBody, probeModel, readAvailability, runSweep, writeAvailability } = await import('../../src/availability.js')
+const { REGIONS, chatRoutes } = await import('../../src/regions.js')
+
+// A deployment is probed with **its own** credential and route, never the other
+// one's: an overseas model asked with a mainland token would answer nonsense.
+// `fetch` is stubbed here to capture exactly what leaves the process.
+const calls = []
+const realFetch = globalThis.fetch
+globalThis.fetch = async (url, init) => {
+  calls.push({ url: String(url), authorization: init?.headers?.Authorization ?? '', body: init?.body })
+  return {
+    status: 400,
+    text: async () => '{"code":11133,"msg":"the request parameters were rejected by the model provider"}'
+  }
+}
+const probeCtx = {
+  logger: { info: () => {}, warn: () => {}, error: () => {} },
+  credentials: { resolve: async (ref) => ({ value: `token-for-${ref}` }) }
+}
+await probeModel(probeCtx, REGIONS.cn, 'hy3')
+await probeModel(probeCtx, REGIONS.intl, 'hy3')
+globalThis.fetch = realFetch
+
+const [cnCall, intlCall] = calls
+assert.equal(cnCall.url, `${chatRoutes(REGIONS.cn)[0].endpoint}/v2/chat/completions`, 'the mainland probe goes to the mainland chat route')
+assert.equal(cnCall.authorization, `Bearer token-for-${REGIONS.cn.tokenRef}`, 'the mainland probe uses the mainland token')
+assert.deepEqual(JSON.parse(cnCall.body).messages, [], 'and the free mainland shape')
+assert.equal(intlCall.url, `${chatRoutes(REGIONS.intl)[0].endpoint}/v2/chat/completions`, 'the overseas probe goes to the overseas chat route')
+assert.equal(intlCall.authorization, `Bearer token-for-${REGIONS.intl.tokenRef}`, 'the overseas probe uses the overseas token')
+assert.notEqual(cnCall.url, intlCall.url, 'the two deployments do not share a route')
+assert.equal(probeBody(REGIONS.intl, 'hy3').messages[0].role, 'system', 'the overseas shape opens with a system message')
+
+// Verdicts, taken from real gateway answers (see docs/workbuddy-protocol.md §6
+// and §4.9). The probe sends an invalid request on purpose, so a healthy model
+// answers a 4xx rather than `200`: reaching the parameter layer is itself the
+// proof that the model id is routed. `11102` is the only "gone" answer.
+assert.equal(classifyProbe(400, '{"code":11102,"msg":"model [glm-4.6] service info not found"}').state, 'dead')
+assert.match(classifyProbe(400, '{"code":11102,"msg":"model [glm-4.6] service info not found"}').detail, /11102/)
+// The same code also carries a permission answer: China replies this way for an
+// id that exists but is gated (`gpt-5.3-codex`).
+assert.equal(classifyProbe(400, '{"code":11102,"msg":"model [gpt-5.3-codex] is only available for authorized users"}').state, 'denied')
+assert.equal(classifyProbe(400, '{"code":11158,"msg":"model [x] is not allowed for user type [personal_free_user]"}').state, 'denied')
+assert.equal(classifyProbe(400, '{"code":11133,"msg":"the request parameters were rejected by the model provider"}').state, 'ok', 'params rejected means the model exists')
+assert.equal(classifyProbe(400, '{"code":11133,"msg":"Invalid request parameters"}').state, 'ok', 'the short wording of the same verdict')
+assert.equal(classifyProbe(400, '{"code":11151,"msg":"a message has empty content, please check the conversation history"}').state, 'ok', 'hy3/hy3-x validate the conversation before the provider does')
+assert.equal(classifyProbe(200, 'data: {"code":0,"choices":[]}').state, 'ok')
+assert.equal(classifyProbe(400, '{"code":9999,"msg":"模型配置异常，请切换其他模型"}').state, 'ok', 'any other 4xx still proves the model is routed')
+assert.match(classifyProbe(400, '{"code":9999,"msg":"模型配置异常，请切换其他模型"}').detail, /模型配置异常/)
+assert.equal(classifyProbe(429, '{"code":6020,"msg":"queue.waiting.title","data":{"queue_position":1144}}').state, 'busy')
+assert.equal(classifyProbe(400, '{"code":11128,"msg":"Illegal API invocation from an unapproved channel"}').state, 'blocked')
+assert.equal(classifyProbe(401, 'nope').state, 'auth')
+assert.equal(classifyProbe(502, '<html>502</html>').state, 'down')
+assert.equal(classifyProbe(0, '').state, 'error', 'a transport failure is not a verdict about the model')
+
+// Only `dead` hides a model; queueing and provider hiccups must not.
+assert.deepEqual(deadModelIds('cn'), new Set(), 'nothing is dead before the first sweep')
+
+writeAvailability('cn', [
+  { id: 'glm-4.6', state: 'dead', detail: '模型不存在', at: Date.now() },
+  { id: 'hy3', state: 'ok', detail: '', at: Date.now() },
+  { id: 'step-5-preview', state: 'busy', detail: '排队', at: Date.now() },
+  { id: 'glm-5.1', state: 'rejected', detail: '参数被拒', at: Date.now() }
+])
+assert.deepEqual([...deadModelIds('cn')], ['glm-4.6'], 'only the dead verdict hides a model')
+
+const ledger = readAvailability('cn')
+assert.equal(ledger.models.size, 4)
+assert.equal(ledger.models.get('hy3').state, 'ok')
+
+// A fresh verdict for the same id replaces the old one, others are kept.
+writeAvailability('cn', [{ id: 'glm-4.6', state: 'ok', detail: '', at: Date.now() }])
+assert.equal(readAvailability('cn').models.get('glm-4.6').state, 'ok', 'a fresh verdict wins')
+assert.equal(readAvailability('cn').models.size, 4, 'other verdicts stay')
+
+// An old `dead` verdict ages out, so a model is advertised again and re-probed.
+writeAvailability('cn', [{ id: 'glm-4.7', state: 'dead', detail: '模型不存在', at: Date.now() - AVAILABILITY_TTL_MS - 1000 }])
+assert.ok(!deadModelIds('cn').has('glm-4.7'), 'a verdict past its TTL no longer hides a model')
+assert.equal(readAvailability('cn').models.get('glm-4.7').state, 'dead', 'the stale verdict is still shown')
+
+const summary = availabilitySummary('cn')
+assert.equal(summary.total, 5)
+assert.deepEqual(summary.counts, { ok: 2, busy: 1, rejected: 1, dead: 1 })
+assert.ok(summary.models.every((entry) => typeof entry.id === 'string'))
+
+// Deployments keep separate ledgers.
+assert.equal(readAvailability('intl').models.size, 0)
+writeAvailability('intl', [{ id: 'gpt-5.6-sol', state: 'ok', detail: '', at: Date.now() }])
+assert.equal(readAvailability('intl').models.size, 1)
+assert.equal(readAvailability('cn').models.size, 5, 'ledgers are per deployment')
+
+console.log('availability.mjs: OK — probe classification, dead-in-TTL rule, merge, and per-deployment ledgers verified')

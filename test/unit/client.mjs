@@ -1,0 +1,325 @@
+/**
+ * Unit check for the Client half. Three layers, cheapest first:
+ *
+ *   1. registration — the module claims `settings.section` with a label thunk
+ *      and installs its dictionaries;
+ *   2. translation — a key the locale service only echoes back falls back to this
+ *      bundle's dictionary (otherwise a hot-reloaded panel shows raw keys);
+ *   3. **render** — the panel actually runs against real answers, and the tree it
+ *      produces carries the numbers, tags and groups a user reads.
+ *
+ * The render layer is the point: the panel is one large function, so a helper
+ * that no longer exists, a renamed dictionary key, or a data branch that throws
+ * is a broken settings page in the app — and layers 1-2 would not notice.
+ *
+ * Run: `node test/unit/client.mjs`
+ */
+
+import assert from 'node:assert/strict'
+
+let definition
+globalThis.window = {
+  __ModuleLoader__: {
+    load: (value) => { definition = value }
+  }
+}
+
+await import('../../client/index.js')
+assert.ok(definition, 'client.js must call window.__ModuleLoader__.load')
+assert.equal(definition.id, 'dsh-workbuddy')
+
+// ---------------------------------------------------------------------------
+// A React small enough to be obviously correct, big enough to run the panel:
+// state updates re-render, effects run once, and the driver settles the tree by
+// awaiting microtasks the way the browser would.
+// ---------------------------------------------------------------------------
+
+const elements = []
+
+function createRoot() {
+  const slots = []
+  let cursor = 0
+  let dirty = false
+  let pending = []
+  let tree
+
+  const schedule = () => { dirty = true }
+
+  const React = {
+    createElement: (type, props, ...children) => {
+      const element = { type, props: props ?? {}, children }
+      elements.push(element)
+      return element
+    },
+    useState: (initial) => {
+      const at = cursor++
+      if (!(at in slots)) slots[at] = { value: typeof initial === 'function' ? initial() : initial }
+      const slot = slots[at]
+      return [slot.value, (next) => {
+        slot.value = typeof next === 'function' ? next(slot.value) : next
+        schedule()
+      }]
+    },
+    // Effects are queued, not run inline: React runs them after the whole
+    // component body has executed, so helpers defined further down are already
+    // initialized. Running them mid-body would report a temporal dead zone that
+    // the real renderer never hits.
+    useEffect: (fn, deps) => {
+      const at = cursor++
+      const previous = slots[at]
+      const changed = previous === undefined || deps === undefined ||
+        deps.some((value, index) => value !== previous.deps[index])
+      slots[at] = { deps: deps ?? [] }
+      if (changed) pending.push(fn)
+    },
+    useCallback: (fn) => fn,
+    useMemo: (fn) => fn(),
+    useRef: (initial) => {
+      const at = cursor++
+      if (!(at in slots)) slots[at] = { current: initial }
+      return slots[at]
+    }
+  }
+
+  /** Render until the tree stops changing, letting pending promises resolve. */
+  const render = async (component, props) => {
+    for (let pass = 0; pass < 12; pass += 1) {
+      cursor = 0
+      dirty = false
+      pending = []
+      tree = component(props)
+      const queued = pending
+      pending = []
+      for (const fn of queued) fn()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      if (!dirty) break
+    }
+    return tree
+  }
+
+  return { React, render }
+}
+
+const { React, render } = createRoot()
+
+const module = definition.factory((name) => {
+  if (name === 'react') return React
+  throw new Error(`unexpected require(${name})`)
+})
+assert.deepEqual(module.inject, ['slots'])
+assert.equal(typeof module.apply, 'function')
+
+const registrations = []
+const injected = []
+const locales = []
+const effects = []
+
+const locale = {
+  getLocale: () => ({ locales: [{ id: 'zh-CN' }, { id: 'en' }], active: 'zh-CN', revision: 1 }),
+  register: (ns, id, dict) => {
+    locales.push({ ns, id, dict })
+    return () => {}
+  },
+  // Mimics a locale service that was handed a dictionary before this bundle
+  // gained new keys: it answers what it knows and echoes anything else back.
+  bind: () => (key) => (key === 'section' ? 'WorkBuddy 模型（来自词典服务）' : key)
+}
+
+module.apply({
+  get: (name) => (name === 'locale' ? locale : undefined),
+  effect: (factory) => { effects.push(factory) },
+  slots: {
+    inject: (owner, callback) => {
+      injected.push(owner)
+      callback()
+    },
+    register: (options, component) => {
+      registrations.push({ options, component })
+      return () => {}
+    }
+  }
+})
+
+assert.deepEqual(injected, ['settings.section'])
+assert.equal(registrations.length, 1)
+assert.equal(registrations[0].options.name, 'settings.section')
+assert.equal(registrations[0].options.id, 'workbuddy')
+assert.equal(typeof registrations[0].options.label, 'function')
+assert.equal(typeof registrations[0].component, 'function')
+assert.equal(locales.length, 2)
+assert.ok(locales.every((entry) => entry.ns === 'workbuddy'))
+assert.ok(effects.length >= 1)
+
+// The label thunk must survive a locale switch (it is re-read per projection).
+assert.equal(registrations[0].options.label(), 'WorkBuddy 模型（来自词典服务）', 'a key the service knows comes from the service')
+
+registrations[0].component({})
+const panelT = elements[elements.length - 1].props.t
+assert.equal(typeof panelT, 'function')
+assert.equal(panelT('section'), 'WorkBuddy 模型（来自词典服务）')
+assert.equal(panelT('renewBoth'), '续期', 'a key the service does not know falls back to the local dictionary')
+assert.equal(panelT('definitelyMissing'), 'definitelyMissing', 'an unknown key is still visible rather than blank')
+assert.equal(panelT('count')(7), '7 个', 'a function-valued entry keeps its arguments')
+
+// ---------------------------------------------------------------------------
+// Render layer
+// ---------------------------------------------------------------------------
+
+/** Every string the tree renders, in order, for assertions about the output. */
+const textsOf = (node, out = []) => {
+  if (node === null || node === undefined || node === false) return out
+  if (typeof node === 'string' || typeof node === 'number') { out.push(String(node)); return out }
+  if (Array.isArray(node)) { for (const child of node) textsOf(child, out); return out }
+  if (typeof node === 'object' && Array.isArray(node.children)) {
+    for (const child of node.children) textsOf(child, out)
+  }
+  return out
+}
+
+/**
+ * Every tooltip in the tree. Some state is deliberately carried by a `title`
+ * rather than by text — the deployment status pill is a coloured dot whose word
+ * exists only as a tooltip.
+ */
+const titlesOf = (node, out = []) => {
+  if (node === null || node === undefined || node === false) return out
+  if (Array.isArray(node)) { for (const child of node) titlesOf(child, out); return out }
+  if (typeof node !== 'object') return out
+  if (typeof node.props?.title === 'string') out.push(node.props.title)
+  if (Array.isArray(node.children)) for (const child of node.children) titlesOf(child, out)
+  return out
+}
+
+const region = (overrides) => ({
+  id: 'cn',
+  provider: 'workbuddy-cn',
+  endpoint: 'https://www.workbuddy.cn',
+  loggedIn: true,
+  pending: false,
+  nickname: '示例账号',
+  expiresAt: Date.now() + 3_600_000,
+  refreshable: true,
+  models: 2,
+  credits: { ok: true, total: 1293.5, daily: 120, unlimited: false, packages: [], at: Date.now() },
+  checkin: { supported: true, ok: true, todayCheckedIn: true, streakDays: 3, weekProgress: [1, 1, 1, 0, 0, 0, 0], active: true },
+  lastClaim: { day: '2026-10-22', claimed: true, credit: 300, at: Date.now() },
+  hasBusy: true,
+  ...overrides
+})
+
+const signedInState = {
+  regions: [
+    region({}),
+    region({ id: 'intl', provider: 'workbuddy-intl', nickname: '900000001', models: 1, hasBusy: false, checkin: null, lastClaim: null })
+  ],
+  importToken: 'token',
+  version: '0.0.0-test',
+  codeStamp: 'test'
+}
+
+/**
+ * Signed out but not expired: the Host reports `loggedIn: false` with
+ * `expiresAt: 0`. A remembered expiry with `loggedIn: false` would mean the
+ * token lapsed, which the panel words as 已过期 instead.
+ */
+const signedOutState = {
+  regions: [
+    region({ loggedIn: false, expiresAt: 0, nickname: '', credits: null, checkin: null, lastClaim: null, models: 0 }),
+    region({ id: 'intl', provider: 'workbuddy-intl', loggedIn: false, expiresAt: 0, nickname: '', credits: null, checkin: null, lastClaim: null, models: 0, hasBusy: false })
+  ],
+  importToken: 'token',
+  version: '0.0.0-test',
+  codeStamp: 'test'
+}
+
+const models = [
+  {
+    id: 'hy3',
+    name: 'Hy3',
+    description: '轻量模型',
+    credits: '0.08',
+    efforts: ['low', 'high'],
+    defaultEffort: 'high',
+    contextWindow: 192000,
+    maxTokens: 64000,
+    input: ['text', 'image'],
+    canDisableThinking: true,
+    promotion: { label: 'Free now', color: '#e5484d', kind: 'discount', text: 'Free daily use', from: '2026-08-06T00:00:00Z', until: '2026-11-01T00:00:00Z' },
+    availability: { state: 'ok', at: Date.now() },
+    enabled: true,
+    decided: false
+  },
+  {
+    id: 'glm-5.0',
+    name: 'GLM-5.0',
+    credits: undefined,
+    efforts: [],
+    input: ['text'],
+    availability: { state: 'dead', detail: '模型不存在', at: Date.now() },
+    enabled: false,
+    decided: false
+  },
+  {
+    // Usable, but the deployment publishes no rate for it: the row must say so
+    // rather than invent one.
+    id: 'gpt-5.3-codex',
+    name: 'GPT-5.3-Codex',
+    credits: undefined,
+    efforts: [],
+    input: ['text'],
+    availability: { state: 'ok', at: Date.now() },
+    enabled: true,
+    decided: true
+  }
+]
+
+/**
+ * The registered component is a thin wrapper that binds the panel's translate
+ * function; the panel itself is the wrapper's element type.
+ */
+const slotComponent = registrations[0].component
+const wrapper = slotComponent({})
+const Panel = wrapper.type
+assert.equal(typeof Panel, 'function', 'the slot renders the panel component')
+
+/** Answer `/state`, `/models`, `/busy` and `/availability` the way the Host does. */
+function installFetch({ state, models: modelAnswer, busy, fail = false }) {
+  const calls = []
+  globalThis.fetch = async (url) => {
+    const href = String(url)
+    calls.push(href)
+    if (fail) throw new Error('offline')
+    const body = href.includes('/models') ? { models: modelAnswer ?? [] }
+      : href.includes('/busy') ? { levels: busy ?? {} }
+        : state
+    return { ok: true, status: 200, json: async () => body }
+  }
+  return calls
+}
+
+globalThis.setTimeout = globalThis.setTimeout ?? (() => 0)
+globalThis.document = { addEventListener: () => {}, removeEventListener: () => {} }
+
+const renderPanel = () => render(Panel, wrapper.props)
+
+// 1) Signed in, with a usable model carrying a promotion and a dead one.
+installFetch({ state: signedInState, models, busy: { hy3: 'busy' } })
+const signedInTree = await renderPanel()
+const signedInText = textsOf(signedInTree)
+for (const expected of ['账户', '大陆版', '海外版', '示例账号', '可用模型', '不可用模型', 'Hy3', 'Free now', '繁忙', '未知', '0.08x', 'GPT-5.3-Codex', '检测可用性', '全部启用']) {
+  assert.ok(signedInText.includes(expected), `the panel renders ${expected}`)
+}
+assert.ok(titlesOf(signedInTree).some((title) => title.startsWith('繁忙程度：')), 'the load tag explains itself in a tooltip')
+
+// 2) Signed out: the sign-in path, and no stale account values.
+installFetch({ state: signedOutState, models: [] })
+const signedOutTree = await renderPanel()
+assert.ok(textsOf(signedOutTree).includes('登录'), 'a signed-out deployment offers sign-in')
+assert.ok(titlesOf(signedOutTree).includes('未登录'), 'the status dot reports the deployment as signed out')
+
+// 3) The Host is unreachable: the panel reports it instead of rendering blank.
+installFetch({ state: signedOutState, models: [], fail: true })
+const failedTree = await renderPanel()
+assert.ok(textsOf(failedTree).some((text) => text.includes('offline')), 'a failed load surfaces the error')
+
+console.log('client.mjs: OK — registration, dictionaries, and three full panel renders verified')
