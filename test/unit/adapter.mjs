@@ -71,10 +71,10 @@ assert.equal(intl.routes()[0].endpoint, 'https://www.workbuddy.ai')
 
 // ---------------------------------------------------------------------------
 // The reasoning controls. `reasoning_effort` is a real, gateway-validated field
-// (an unknown value is refused with 11133) and it demonstrably changes how much
-// the model thinks on a task with room for it, so the body must carry the level
-// the harness selected — and nothing invented when it names no level, or names
-// one the model does not declare.
+// (an unknown value is refused with 11133 on deepseek) and it is what makes an
+// optional-thinking model think at all, so the body must carry the level the
+// harness selected, the deepseek fallback must stay, and nothing may be invented
+// for a model that declares no levels or is outside the verified family.
 // ---------------------------------------------------------------------------
 const withLevels = (id, levels, isDeepSeek = false) => ({
   id,
@@ -103,15 +103,6 @@ const otherFamily = withLevels('glm-5.2', ['low', 'medium', 'high'])
 const otherChosen = cn.buildBody({ model: otherFamily.id, messages: [], reasoningEffort: 'medium' }, otherFamily.id, otherFamily, undefined)
 assert.equal(otherChosen.reasoning_effort, 'medium', 'other families send the selected level too')
 assert.equal(otherChosen.thinking, undefined, 'no invented thinking field outside the verified family')
-
-// Measured: for glm a request without `reasoning_effort` reasons zero characters,
-// so the fallback must cover every family that declares levels — not only
-// deepseek — and it prefers the model's own declared default.
-const silentGlm = cn.buildBody({ model: otherFamily.id, messages: [] }, otherFamily.id, otherFamily, undefined)
-assert.equal(silentGlm.reasoning_effort, 'medium', 'a level-declaring model with no selection gets its declared default')
-
-const silentStep = cn.buildBody({ model: 'step-x', messages: [] }, 'step-x', withLevels('step-x', ['low', 'medium', 'high']), undefined)
-assert.equal(silentStep.reasoning_effort, 'medium')
 
 const noLevels = cn.buildBody({ model: 'hy3', messages: [], reasoningEffort: 'high' }, 'hy3', { id: 'hy3', name: 'Hy3', input: ['text'] }, undefined)
 assert.equal(noLevels.reasoning_effort, undefined, 'a model with no declared levels gets no reasoning field')

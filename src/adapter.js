@@ -656,33 +656,23 @@ export class WorkBuddyAdapter {
     const maxTokens = positiveInt(options.maxTokens) ?? entry?.maxTokens
     if (maxTokens !== undefined) body.max_tokens = maxTokens
 
-    // Thinking is pinned on, and there is no switch anywhere in the plugin:
-    // upstream publishes `reasoning.canDisableThinking` without naming a request
-    // parameter that would act on it (protocol §4.3.1), so `reasoning_effort` is
-    // the only reasoning control. The explicit `thinking` field is sent where the
-    // official client is known to send it (deepseek family, §4.5); the other
-    // families ignore it — measured: `enabled`, `disabled` and a nonsense value
-    // all answer 200 there, so it is not a switch either.
+    // Thinking is pinned on: there is no switch anywhere in the plugin. Upstream
+    // publishes `reasoning.canDisableThinking` without naming a request parameter
+    // that would act on it (protocol §4.3.1), so the effort level is the only
+    // reasoning control, and the explicit `thinking` field is sent where the
+    // official client is known to send it (deepseek family, §4.5) — the other
+    // families ignore it, whatever the value.
     const isDeepSeek = model.startsWith('deepseek-')
     if (isDeepSeek) body.thinking = { type: 'enabled' }
     // `efforts` is optional: many catalog entries declare no level set, and
     // reading `Object.keys` off that `undefined` used to throw before the
     // request was even built.
     const levels = entry?.efforts === undefined ? [] : Object.keys(entry.efforts)
-    const selected = options.reasoningEffort !== undefined && levels.includes(options.reasoningEffort)
-      ? options.reasoningEffort
-      : undefined
-    // Measured 2026-10-22 (§3.1): for the *optional*-thinking families (deepseek,
-    // glm) a request without `reasoning_effort` reasons **zero** characters — the
-    // field is what turns thinking on, and an unknown value is only rejected by
-    // deepseek. So any model that declares levels always gets one: the selection,
-    // else its declared default, else `high` when that is on the menu. Families
-    // that always think (hy3, step) declare no levels and are left alone.
-    const declaredDefault = entry?.defaultEffort !== undefined && levels.includes(entry.defaultEffort)
-      ? entry.defaultEffort
-      : undefined
-    if (selected !== undefined) body.reasoning_effort = selected
-    else if (levels.length > 0) body.reasoning_effort = declaredDefault ?? (levels.includes('high') ? 'high' : levels[0])
+    if (options.reasoningEffort !== undefined && levels.includes(options.reasoningEffort)) {
+      body.reasoning_effort = options.reasoningEffort
+    } else if (isDeepSeek && levels.length > 0) {
+      body.reasoning_effort = levels.includes('high') ? 'high' : levels[0]
+    }
     return body
   }
 
