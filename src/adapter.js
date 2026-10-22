@@ -990,11 +990,14 @@ export class WorkBuddyAdapter {
       : finishReason === 'length'
         ? { kind: 'max-tokens' }
         : { kind: 'stop' }
-    // A budget truncation looks like a complete answer to everyone downstream —
-    // this line is the only place it is distinguishable from the model choosing to
-    // stop, so it is logged even though nothing is wrong on our side.
+    // Two endings are complete-looking but are not the model choosing to stop, and
+    // nothing downstream can tell them apart. Both get a line of their own:
+    //   · the answer ran into the output budget (a truncation reads as a finish);
+    //   · upstream closed with `[DONE]` but never said *why* the answer ended.
     if (reason.kind === 'max-tokens') {
       this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的输出达到上限，本步被截断（输出 ${outputTokens ?? '未知'} tokens）`)
+    } else if (reason.kind === 'stop' && finishReason === undefined) {
+      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的响应以 [DONE] 收尾但没有 finish_reason，按 stop 处理（输出 ${outputTokens ?? '未知'} tokens）`)
     }
     yield { type: 'finish', reason }
   }
