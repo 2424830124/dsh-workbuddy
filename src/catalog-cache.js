@@ -42,8 +42,21 @@ const MODALITY_ORDER = ['text', 'image']
  * ago is not a fallback — it is wrong. The cache stores no copy, and a cached
  * entry therefore reports no rate at all; the panel shows 未知 rather than a
  * stale number.
+ *
+ * The other two are live *statements* rather than measurements, and the cache is
+ * append-only (a field another read omits is never cleared), so keeping them
+ * would let an old claim outlive the payload that made it:
+ *
+ * - `promotion` comes from the deployment's `modelPromotions` block, which moves
+ *   with each campaign; a cached badge can advertise a promotion that ended.
+ * - `canDisableThinking` is a capability each catalog read either states or
+ *   stays silent about. Measured 2026-10-22: the China scoped payload stopped
+ *   sending it for five models (`glm-5.2`, `kimi-k3-1`, `deepseek-v4-flash`,
+ *   `deepseek-v4-pro`, `hy3`) while the overseas one kept sending it for all of
+ *   them, and the cache kept the old values — the panel then claimed a
+ *   capability upstream no longer advertised.
  */
-const VOLATILE_FIELDS = new Set(['credits'])
+const VOLATILE_FIELDS = new Set(['credits', 'promotion', 'canDisableThinking'])
 
 function cacheDir() {
   const home = typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME.length > 0

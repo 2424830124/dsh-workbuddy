@@ -34,6 +34,7 @@ const rich = writeCatalogCache('cn', 'scoped', [{
   efforts: { low: 'low', high: 'high' },
   defaultEffort: 'high',
   canDisableThinking: false,
+  promotion: { kind: '夜间折扣', endsAt: '2026-10-23' },
   thinking: true,
   official: true,
   preset: false
@@ -58,12 +59,16 @@ const hy3 = cached.entries.find((entry) => entry.id === 'hy3')
 assert.equal(hy3.descriptionZh, '混元思考模型，具有增强的推理能力', 'description survives a read that omits it')
 assert.equal(hy3.descriptionEn, 'Enhanced reasoning')
 assert.equal(hy3.credits, undefined, 'the credits rate is volatile and is never cached')
+// A capability is a live statement: the China payload stopped sending this one
+// for five models on 2026-10-22, and a cache that kept the old value made the
+// panel advertise what upstream no longer said.
+assert.equal(hy3.canDisableThinking, undefined, 'a capability upstream may stop sending is never cached')
+assert.equal(hy3.promotion, undefined, 'a promotion moves with each campaign and is never cached')
 assert.equal(hy3.contextWindow, 192000, 'context window survives')
 assert.equal(hy3.maxTokens, 64000)
 assert.deepEqual(hy3.input, ['text', 'image'], 'a modality once advertised is kept')
 assert.deepEqual(hy3.efforts, { low: 'low', high: 'high' }, 'level sets survive; a missing list is not a downgrade')
 assert.equal(hy3.defaultEffort, 'high')
-assert.equal(hy3.canDisableThinking, false)
 assert.equal(hy3.name, 'Hy3')
 assert.equal(typeof hy3.firstSeen, 'number')
 assert.equal(typeof hy3.lastSeen, 'number')
@@ -76,11 +81,13 @@ writeCatalogCache('cn', 'scoped', [{
   efforts: { low: 'low', high: 'high', max: 'max' },
   defaultEffort: 'max',
   input: ['text', 'image'],
+  canDisableThinking: true,
   official: true
 }])
 const updated = readCatalogCache('cn').entries.find((entry) => entry.id === 'hy3')
 assert.equal(updated.name, 'Hy3 (updated)', 'a supplied value wins')
 assert.equal(updated.credits, undefined, 'a rate read now is still not persisted')
+assert.equal(updated.canDisableThinking, undefined, 'a capability read now is not persisted either')
 assert.deepEqual(updated.efforts, { low: 'low', high: 'high', max: 'max' }, 'level sets union')
 assert.equal(updated.defaultEffort, 'max')
 assert.equal(updated.descriptionZh, '混元思考模型，具有增强的推理能力', 'still carried')

@@ -253,7 +253,7 @@ data: [DONE]
 | `contextWindow` | 仅部分模型有：`{defaultLength, supportedLengths:[…]}`（如 step-5: `[300000, 1000000]`） |
 | `maxOutputTokens` | 输出上限 |
 | `supportsImages` / `supportsReasoning` / `supportsToolCall` / `disabledMultimodal` | 能力位 |
-| `onlyReasoning` / `canDisableThinking` | 是否强制思考 / 可否关闭 |
+| `onlyReasoning` / `canDisableThinking` | 是否强制思考 / **上游声明**"可否关闭思考"（见 §4.3.1） |
 | `reasoning` | `{effort, summary, defaultEffort, supportedEfforts:[…]}`；`effort` 是默认档，`supportedEfforts` 才是可选集合 |
 | `relatedModels` | 关联模型映射，如 `{lite, reasoning, builtin-lite}` |
 | `credits` | 倍率字符串，如 `"x0.00 credits"` / `"x2.20 credits"` / `"x0.05"` |
@@ -263,8 +263,28 @@ data: [DONE]
 | `iconUrl` / `iconUrl_en` | 图标（base64 data-URI 或 HTTPS URL，按语言选） |
 | `AccountAttributes` ❓ | 出现在积分包里，模型侧未见 |
 
-### 4.3 `/v3/config` 结构
+#### 4.3.1 `canDisableThinking` 是"实时声明"，且上游没有给关闭参数（2026-10-22 实测）
 
+三个结论都有原始响应与缓存对比支撑（`node test/live/reasoning-audit.mjs [cn|intl]`）：
+
+1. **上游只发一个布尔位，不发参数名。** `reasoning` 块出现过的字段只有
+   `canDisableThinking` / `defaultEffort` / `effort` / `summary` / `supportedEfforts`；
+   整条记录里像"开关"的字段只有 `canDisableThinking` 和 `disabledMultimodal`（后者是
+   多模态能力，与思考无关）。也就是说：**"能不能关"是知道的，"怎么关"上游没说。**
+   本插件在请求里给 deepseek 系发的是 `thinking:{type:'enabled'}`（§4.5 表），
+   反向参数（关闭）**尚未验证**，候选：`thinking:{type:'disabled'}`、
+   `enable_thinking:false`、`reasoning:{effort:'none'}` —— 要确认必须发一次真实请求看
+   回复里还有没有 `reasoning_content`（大陆版一次探测级别的花费）。
+2. **两个部署各自独立声明。** 同一天里：大陆版对 `glm-5.2`、`kimi-k3-1`、
+   `deepseek-v4-flash`、`deepseek-v4-pro`、`hy3` **完全不发**该字段，而海外版对同样的 id
+   一律发 `true`/`false`。谁都不是"错"的 —— 它们是两套网关、两套目录，所以面板按当前
+   部署各自的目录显示，不做跨部署统一。
+3. **字段会消失，所以不能进缓存。** 大陆版对这 5 个模型过去发过、现在不发了；缓存是
+   追加式的（缺字段不覆盖），旧值会一直留着 → 面板曾因此宣称一个上游已不再声明的能力。
+   现在 `credits`、`promotion`、`canDisableThinking` 三者都在 `VOLATILE_FIELDS` 里：
+   写时不落盘、读时丢弃，缺失就显示「未知」。
+
+### 4.3 `/v3/config` 结构
 ```json
 {"code":0,"data":{
   "$schema":"product-schema.json",
