@@ -79,6 +79,7 @@ for (const size of sizes) {
     let finish
     let text = ''
     let toolBlocks = 0
+    let diagnostics
     const started = Date.now()
     try {
       for await (const chunk of adapter.stream({
@@ -93,17 +94,18 @@ for (const size of sizes) {
       })) {
         if (chunk.type === 'text-delta') text += chunk.text ?? ''
         if (chunk.type === 'block-end' && chunk.block?.type === 'tool-call') toolBlocks += 1
-        if (chunk.type === 'finish') finish = chunk.reason
+        if (chunk.type === 'finish') { finish = chunk.reason; diagnostics = chunk.response }
       }
     } catch (error) {
       errors += 1
       samples.push(`抛错:${error.code ?? error.message}`)
       continue
     }
+    const who = diagnostics === undefined ? '?' : `${diagnostics.provider}/${diagnostics.model}`
     const seconds = ((Date.now() - started) / 1000).toFixed(1)
-    if (finish?.kind === 'tool-calls' || toolBlocks > 0) { calls += 1; samples.push(`call(${seconds}s)`) }
-    else if (finish?.kind === 'stop') { stops += 1; samples.push(`STOP(${seconds}s,正文 ${text.length} 字:${text.slice(0, 20)})`) }
-    else samples.push(`${finish?.kind ?? '(无)'}(${seconds}s)`)
+    if (finish?.kind === 'tool-calls' || toolBlocks > 0) { calls += 1; samples.push(`call(${seconds}s, ${who})`) }
+    else if (finish?.kind === 'stop') { stops += 1; samples.push(`STOP(${seconds}s, ${who}, 正文 ${text.length} 字:${text.slice(0, 20)})`) }
+    else samples.push(`${finish?.kind ?? '(无)'}(${seconds}s, ${who})`)
   }
   console.log(`\n输入约 ${Math.round(chars / 1000)}k 字符 / ${messages.length} 条消息`)
   console.log(`  调用工具 ${calls}/${rounds}   提前 stop ${stops}/${rounds}   抛错 ${errors}`)

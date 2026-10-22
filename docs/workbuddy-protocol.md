@@ -394,6 +394,7 @@ data: [DONE]
 | INTL scoped → `500`（openresty/APISIX，HTML 错误页） | 2026-10-21 起持续；`/v3/config` 正常 ✅ |
 | `glm-5.1` 图片能力两个端点矛盾 | scoped 报 `false`、`/v3/config` 报 `true`，实测能看图（📖 参考实现据此写了覆盖白名单） |
 | 目录包含渠道不服务的模型 | 见 `11102`（§6）✅ |
+| 长上下文下"说话说一半就收尾"（`finish_reason: stop`，无工具调用） | 上游/模型行为，**不是插件问题**。实测：同一提示、同一套工具、只改前面的对话长度 —— 0k 2/2 正常、30k 1/2（一次 181 字后 `stop`）、89k 1/2；每次 finish 诊断块都标 `workbuddy-intl/deepseek-v4.1-flash`。判据：流里**没有任何 tool-call 分片**、`finish_reason` 就是 `stop`（若丢帧会是 `tool_calls` 且能看到分片）。已排除：采样（四档温度 16/16 正常）、工具 schema/数量（70 个 / 单个 / 简化 schema 9/9 正常）、提示词校验（海外版无此错误，请求体按原样转发）。复现：`node test/live/long-context-probe.mjs 2`；排查：`node test/live/toolcall-audit.mjs <会话前缀>`、`sampling-probe.mjs`、`tools-probe.mjs`。缓解只有换模型/压缩上下文/回一句"继续" —— 合法的 `stop` 不能当错误重试。 |
 
 ### 4.7 模型选择器里每一项元数据的来源
 
