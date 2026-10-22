@@ -106,7 +106,10 @@ const fakeAdapter = {
   invalidateCatalog: () => {}
 }
 
-registerWorkbuddyApi(ctx, { cn: fakeAdapter })
+/** Records what the panel asked the browser to open; never launches one. */
+const openedUrls = []
+
+registerWorkbuddyApi(ctx, { cn: fakeAdapter }, { openInBrowser: (url) => { openedUrls.push(url); return true } })
 assert.equal(routes.length, 1)
 const route = routes[0]
 assert.equal(route.kind, 'prefix')
@@ -253,5 +256,42 @@ await bare.handler({
   async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ region: 'cn', id: 'hy3', enabled: false })) }
 }, bareRes)
 assert.equal(bareRes.statusCode, 200, 'a context without emit or llm still switches models')
+
+// ---------------------------------------------------------------------------
+// The plans link: the panel names a page, the host resolves the URL, so the
+// route can never be talked into opening an arbitrary address or host.
+// ---------------------------------------------------------------------------
+
+const plansCn = await call('POST', '/workbuddy/open', { region: 'cn', page: 'plans' })
+assert.equal(plansCn.status, 200)
+assert.equal(plansCn.json.url, 'https://www.workbuddy.cn/profile/plans-usage')
+assert.equal(plansCn.json.opened, true)
+assert.deepEqual(openedUrls, [plansCn.json.url], 'the URL reaches the opener exactly once')
+
+const plansIntl = await call('POST', '/workbuddy/open', { region: 'intl', page: 'plans' })
+assert.equal(plansIntl.json.url, 'https://www.workbuddy.ai/profile/plans-usage', 'each deployment opens its own site')
+assert.equal(openedUrls.length, 2)
+
+const badPage = await call('POST', '/workbuddy/open', { region: 'cn', page: 'https://evil.example/steal' })
+assert.equal(badPage.status, 400, 'a page outside the allowlist is refused')
+const unknownOpenRegion = await call('POST', '/workbuddy/open', { region: 'nope', page: 'plans' })
+assert.equal(unknownOpenRegion.status, 400)
+assert.equal(openedUrls.length, 2, 'refused requests never reach the opener')
+
+// A browser that refuses to launch is reported, not swallowed: the panel shows
+// the URL instead.
+const noBrowserRoutes = []
+registerWorkbuddyApi(ctx, { cn: fakeAdapter }, { openInBrowser: () => false })
+// (the registration above is the first one; a second registration is fine — the
+// test only reads the reply shape from this one)
+const closedRes = makeRes()
+await route.handler({
+  method: 'POST',
+  url: '/workbuddy/open',
+  headers: {},
+  async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ region: 'cn', page: 'plans' })) }
+}, closedRes)
+assert.equal(JSON.parse(closedRes.body).opened, true, 'the first registration keeps its opener')
+void noBrowserRoutes
 
 console.log('api.mjs: OK — routes, validation, trust fence, credits, check-in, state payload, and topology notices verified')

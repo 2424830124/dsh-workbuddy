@@ -21,7 +21,7 @@ import { claimDailyCheckin, fetchCheckinStatus, fetchCredits } from './credits.j
 import { localDayKey } from './http.js'
 import { isEnabled, readPrefs, setEnabled } from './model-prefs.js'
 import { readOfficialList, writeOfficialList } from './official-list.js'
-import { REGIONS, REGION_IDS } from './regions.js'
+import { REGIONS, REGION_IDS, sitePageUrl } from './regions.js'
 import { notifyModelTopology } from './topology.js'
 
 const API_PREFIX = '/workbuddy'
@@ -32,6 +32,12 @@ const ICON_PATH = fileURLToPath(new URL('../icon.webp', import.meta.url))
 const MASK_PATH = fileURLToPath(new URL('../icon-mask.png', import.meta.url))
 let iconBytes
 let maskBytes
+
+/** Late-bound so importing this module never pulls in the child-process helper. */
+async function defaultOpenInBrowser(url) {
+  const { openInBrowser } = await import('./regions.js')
+  return openInBrowser(url)
+}
 
 /**
  * Which build of this file the running host actually loaded.
@@ -135,8 +141,14 @@ async function statePayload(ctx, adapters) {
 /**
  * Register the panel's routes. Call inside `ctx.inject(['webServer'], …)` so a
  * composition without an HTTP carrier keeps the adapter and the command.
+ *
+ * @param {object} ctx - host plugin context.
+ * @param {Record<string, object>} adapters - per-deployment adapters.
+ * @param {{ openInBrowser?: (url: string) => boolean }} [options] - the browser
+ *   opener is injectable so tests never launch a real one.
  */
-export function registerWorkbuddyApi(ctx, adapters) {
+export function registerWorkbuddyApi(ctx, adapters, options = {}) {
+  const openInBrowser = options.openInBrowser ?? defaultOpenInBrowser
   const rejected = (req, res) => {
     const connection = ctx.get('connection')
     if (connection === undefined || typeof connection.requestRejection !== 'function') return false
@@ -310,6 +322,32 @@ export function registerWorkbuddyApi(ctx, adapters) {
           total: models.length,
           enabledCount: models.filter((entry) => isEnabled(prefs, entry.id, dead.has(entry.id))).length
         })
+        return
+      }
+
+      /**
+       * Open one of the deployment's own site pages in the user's browser.
+       *
+       * The panel sends a page *name*; the URL comes from `SITE_PAGES`, so this
+       * route can never be talked into opening an arbitrary address. The reply
+       * carries the URL even when launching failed, so the panel can show it.
+       */
+      if (path === `${API_PREFIX}/open` && method === 'POST') {
+        const body = await readJsonBody(req)
+        const region = REGIONS[String(body?.region ?? '').toLowerCase()]
+        const url = sitePageUrl(region, body?.page)
+        if (url === undefined) {
+          sendJson(res, 400, { error: 'unknown region or page' })
+          return
+        }
+        let opened = false
+        try {
+          opened = (await openInBrowser(url)) !== false
+        } catch (error) {
+          ctx.logger.warn(`[workbuddy] ${region.id}: 打开 ${url} 失败 — ${error instanceof Error ? error.message : String(error)}`)
+        }
+        ctx.logger.info(`[workbuddy] ${region.id}: 打开官方页面 ${url}（${opened ? '已交给浏览器' : '启动失败'}）`)
+        sendJson(res, 200, { region: region.id, url, opened })
         return
       }
 

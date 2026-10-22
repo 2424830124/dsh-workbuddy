@@ -168,7 +168,10 @@ const accountCard = (accounts) => {
     cells.push(cell(0, `<span class="wb-account-name">${account.nickname}</span>`))
     cells.push(cell(1, `<span class="wb-num">${account.expires}</span>`))
     cells.push(cell(2, `<span class="wb-credits-value">${account.credits}</span>
-        <button type="button" class="wb-icon-btn" title="刷新积分">⟳</button>`))
+        <span class="wb-cell-actions">
+          <button type="button" class="wb-icon-btn" title="刷新积分">⟳</button>
+          <button type="button" class="wb-link-btn" title="在浏览器打开该部署的官方套餐页（用量与订阅）">套餐</button>
+        </span>`))
     cells.push(cell(3, `<button type="button" class="wb-btn wb-btn-primary">更换账号</button>
         <button type="button" class="wb-btn wb-btn-danger">退出登录</button>`, true))
   })

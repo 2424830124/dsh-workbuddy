@@ -51,6 +51,9 @@ window.__ModuleLoader__.load({
         colCredits: '积分',
         colActions: '操作',
         refreshCredits: '刷新积分',
+        openPlans: '套餐',
+        openPlansHint: '在浏览器打开该部署的官方套餐页（用量与订阅）',
+        openPlansFailed: (url) => `没能自动打开浏览器，请手动访问：${url}`,
         creditsRate: '消耗速度（实时）',
         models: '模型',
         login: '登录',
@@ -135,6 +138,9 @@ window.__ModuleLoader__.load({
         colCredits: 'Credits',
         colActions: 'Actions',
         refreshCredits: 'Refresh credits',
+        openPlans: 'Plans',
+        openPlansHint: 'Open this deployment’s official plans page in your browser',
+        openPlansFailed: (url) => `Could not launch a browser — open this instead: ${url}`,
         creditsRate: 'Consumption rate (live)',
         models: 'Models',
         login: 'Sign in',
@@ -253,12 +259,15 @@ window.__ModuleLoader__.load({
   /* The minimum keeps a row on one line; below that the table scrolls instead of
      reflowing a row. Kept small because the balance row only ever holds the
      number and its refresh. */
-  grid-template-columns: 64px repeat(var(--wb-cols), minmax(150px, 240px)) 64px;
+  grid-template-columns: 56px repeat(var(--wb-cols), minmax(158px, 240px)) 56px;
   justify-content: center;
   /* Rows are a fixed height in every state, so the card does not change size
      between "loading" and "signed in", and the separators line up. */
   grid-auto-rows: 52px;
-  column-gap: 24px; row-gap: 0; align-items: stretch; }
+  /* The gap is also the clearance on both sides of the separator drawn down the
+     middle, so it has to read as a division (about 16px of air per column) —
+     wide enough that the balance row's buttons never touch the line. */
+  column-gap: 32px; row-gap: 0; align-items: stretch; }
 /* One continuous separator between the deployments, drawn down the middle of
    the symmetric grid. It fades out at both ends, so it reads as a division of
    the two accounts rather than a stray table border. */
@@ -274,16 +283,24 @@ window.__ModuleLoader__.load({
    read; only the standalone sign-in cell is centred. No rule between rows: the
    spacing and the vertical separator already say where the columns are. */
 .wb-td { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* The action pair of one cell, pinned to the right edge of its column. */
+.wb-cell-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 10px; }
 .wb-td-span { display: flex; align-items: center; justify-content: center; }
 .wb-account-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-num { font-variant-numeric: tabular-nums; color: var(--wb-muted); }
 .wb-credits-value { font-size: 16.5px; font-weight: 650; color: var(--wb-accent-strong);
   font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
 /* A bare icon action: no box, just the glyph, tinted on hover. */
-.wb-icon-btn { font: inherit; font-size: 13px; line-height: 1; padding: 5px 7px; border-radius: 6px; cursor: pointer;
-  border: 0; background: transparent; color: var(--wb-muted); transition: background .15s, color .15s; }
+.wb-icon-btn { font: inherit; font-size: 13px; line-height: 1; padding: 5px 7px; border-radius: 6px; cursor: pointer;  border: 0; background: transparent; color: var(--wb-muted); transition: background .15s, color .15s; }
 .wb-icon-btn:hover:not(:disabled) { background: var(--wb-accent-soft); color: var(--wb-accent-strong); }
 .wb-icon-btn:disabled { opacity: .4; cursor: not-allowed; }
+/* The link out to the official plans page: same quiet weight as the icon
+   actions beside it, but it needs words to say where it goes — kept tight so the
+   balance row still fits one line in a narrow panel. */
+.wb-link-btn { font: inherit; font-size: 11px; line-height: 1; padding: 4px 7px; border-radius: 6px;
+  cursor: pointer; border: 1px solid var(--wb-line-soft); background: transparent; color: var(--wb-muted);
+  white-space: nowrap; transition: background .15s, color .15s, border-color .15s; }
+.wb-link-btn:hover { background: var(--wb-accent-soft); color: var(--wb-accent-strong); border-color: transparent; }
 .wb-td .wb-btn { display: inline-flex; align-items: center; justify-content: center;
   padding: 5px 10px; font-size: 11.5px; min-width: 78px; }
 .wb-td-span .wb-btn { padding: 7px 16px; }
@@ -851,6 +868,25 @@ window.__ModuleLoader__.load({
         }
       }
 
+      /**
+       * Open the deployment's official plans page in the user's browser.
+       *
+       * The host resolves the URL from its own allowlist, so the panel only ever
+       * names a page. When launching fails the reply still carries the URL and
+       * the panel shows it, rather than pretending nothing happened.
+       */
+      const openPlans = async (regionId) => {
+        setError('')
+        try {
+          const result = await request('/open', { method: 'POST', body: JSON.stringify({ region: regionId, page: 'plans' }) })
+          if (result.opened !== true && typeof result.url === 'string') {
+            setError(t('openPlansFailed')(result.url))
+          }
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+        }
+      }
+
       const credits = region?.credits
       const checkin = region?.checkin
       const models = region === undefined ? undefined : modelMap[region.id]
@@ -1161,15 +1197,29 @@ window.__ModuleLoader__.load({
             entry.credits !== null && entry.credits !== undefined && entry.credits.ok === true
               ? h('span', { key: 'value', className: 'wb-credits-value' }, formatCredits(entry.credits.total))
               : h('span', { key: 'value', className: 'wb-muted' }, t('unknown')),
-            h('button', {
-              key: 'refresh',
-              type: 'button',
-              className: 'wb-icon-btn',
-              title: t('refreshCredits'),
-              'aria-label': t('refreshCredits'),
-              disabled: creditBusy === entry.id,
-              onClick: () => void refreshCredits(entry.id)
-            }, creditBusy === entry.id ? '…' : '⟳')
+            // The number stays on the left edge (it lines up with the account and
+            // expiry values above); both actions sit against the column's right
+            // edge, so they never crowd the figure and always read as controls.
+            h('span', { key: 'actions', className: 'wb-cell-actions' }, [
+              h('button', {
+                key: 'refresh',
+                type: 'button',
+                className: 'wb-icon-btn',
+                title: t('refreshCredits'),
+                'aria-label': t('refreshCredits'),
+                disabled: creditBusy === entry.id,
+                onClick: () => void refreshCredits(entry.id)
+              }, creditBusy === entry.id ? '…' : '⟳'),
+              // The official plans page needs the deployment's own signed-in
+              // session, so it opens in the user's browser rather than in here.
+              h('button', {
+                key: 'plans',
+                type: 'button',
+                className: 'wb-link-btn',
+                title: t('openPlansHint'),
+                onClick: () => void openPlans(entry.id)
+              }, t('openPlans'))
+            ])
           ]))
           cells.push(cell(3, 'actions', accountActions(entry)))
         })

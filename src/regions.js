@@ -76,6 +76,30 @@ export function regionList(raw) {
   return region === undefined ? [] : [region]
 }
 
+/**
+ * Site pages the panel may ask the user's browser to open.
+ *
+ * A fixed list on purpose: the panel sends a page *name*, never a URL, so a
+ * compromised or careless client cannot make the host open an arbitrary address
+ * (or a different host) through this route.
+ */
+export const SITE_PAGES = {
+  plans: '/profile/plans-usage'
+}
+
+/**
+ * Resolve one allowed site page for a deployment.
+ *
+ * @param {object} region - entry from `REGIONS`.
+ * @param {string} page - key from `SITE_PAGES`.
+ * @returns {string|undefined} absolute URL, or `undefined` when the pair is unknown.
+ */
+export function sitePageUrl(region, page) {
+  const path = SITE_PAGES[String(page ?? '').toLowerCase()]
+  if (region === undefined || path === undefined) return undefined
+  return `${region.endpoint}${path}`
+}
+
 /** Chat routes in preference order: the gateway first, the web host as fallback. */
 export function chatRoutes(region) {
   const primary = {
