@@ -22,11 +22,16 @@ WorkBuddy 模型接入插件（DeepSeek Harness / DSH），同时支持两个部
 # 从 npm 安装到某个 profile（会同时把 bundle 挂进该 profile）
 dsh plugin --profile <profile> add @huai_xin/dsh-workbuddy
 
-# 本地目录（未发布时）
+# 直接从 GitHub 安装（npm 版本还没跟上改动时用它）
+dsh plugin --profile <profile> add github:2424830124/dsh-workbuddy
+
+# 本地目录（开发时）
 dsh plugin --profile <profile> add /path/to/dsh-workbuddy
 ```
 
-也可以在 Web UI 的插件管理里安装（效果相同，都是往 profile 的 `dsh.profile.bundles` 里加一条并应用 patch）。
+npm 页面：<https://www.npmjs.com/package/@huai_xin/dsh-workbuddy>
+
+也可以在 Web UI 的插件管理里安装（效果相同，都是往 profile 的依赖里加一条并应用 patch）。
 
 安装后需要重启 DSH（替换已加载的 JS 模块需要新的 generation），随后 `/workbuddy` 命令即可使用。
 
@@ -34,12 +39,9 @@ dsh plugin --profile <profile> add /path/to/dsh-workbuddy
 
 ### 设置页
 
-**设置 → WorkBuddy**（侧边栏齿轮 → WorkBuddy）是**一张卡片 + 账号标签页**：海外版与大陆版各自独立登录，点标签只切换查看，不影响已登录的账号。
+界面长什么样、每块显示什么，见下面的 [设置面板](#设置面板) 一节（含截图）。
 
-- 卡片头：状态圆点 + 部署名 + provider/端点 + 状态胶囊
-- 信息区：账号、到期时间、是否可自动续期、**积分**（总量 + 其中签到获得的）、**每日签到**（今日状态、连续天数、本周进度点）
-- 按钮：**登录**、**立即领取**（签到未完成时可点）、**续期**、**退出登录**
-- 卡片下方**常驻该账号的模型列表**，切标签即换列表
+面板通过宿主路由 `/workbuddy/{state,login,logout,refresh,models,checkin,availability,credits,busy,enabled,import}` 读写状态，这些路由走与宿主一致的连接信任栅栏，只对本机已被 GUI 接纳的来源开放。
 
 积分与签到：
 
@@ -47,8 +49,6 @@ dsh plugin --profile <profile> add /path/to/dsh-workbuddy
 - 签到是幂等的：服务端今天已领过会返回 `code 10001`，所以重启不会重复发积分
 - 登录成功后也会立刻补一次签到
 - 海外版后端没有签到接口，只显示积分、不显示领取按钮
-
-面板通过宿主路由 `/workbuddy/{state,login,logout,refresh,models,checkin}` 读写状态，这些路由走与宿主一致的连接信任栅栏，只对本机已被 GUI 接纳的来源开放。
 
 ### 命令
 

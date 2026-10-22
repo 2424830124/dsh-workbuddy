@@ -113,3 +113,26 @@ git push -u origin public:main               # 远端 main 由这份干净历史
 
 之后继续在 `main` 上开发、发布时重建 `public`；或者干脆把 `main` 重置到干净历史上
 （`git checkout main && git reset --hard public`），让唯一的本地历史就是公开历史。
+
+## 发布到 npm
+
+包名 `@huai_xin/dsh-workbuddy`（无 scope 的 `dsh-workbuddy` 已被别人占位，别去动它）。
+
+```sh
+npm.cmd publish                     # Windows 上 npm 被执行策略挡住时必须用 npm.cmd
+npm.cmd publish --otp=123456        # 若提示需要验证码：显式传当前 6 位码
+npm.cmd view @huai_xin/dsh-workbuddy version --prefer-online   # 发完核对
+```
+
+几条踩过的坑：
+
+- **发布强制要 2FA 验证码**（账号的 2FA 模式已设为 `auth-only`，但发布这一步 npm 仍然单独要求
+  一次 OTP；没有 breaks 2FA 的 token 是唯一例外，而它 2027-01 起会被禁用）。码 30 秒过期，
+  所以拿到就立刻发，过期换新的。
+- **桌面端的交互提示常常不渲染**：`npm publish` 会停在那行不动，看起来像卡死。用
+  `--otp=` 显式传码即可绕开。
+- **首次发布要过人工审核**：npm 会先发一个 `0.0.0-stage` 占位版本，页面显示
+  "Temporary Holding Version"，真实版本审核通过后才出现在 registry（当时 `npm view` 报 404，
+  是没传播完，不是失败）。审核期间"网页能看到、registry 查不到"是正常的。
+- 版本号与 `package.json` 一致；改完文档不必升版本，发版才需要 `npm version patch`。
+- 发完记得重启 DSH 才是"装上了"：`dsh plugin --profile <profile> add @huai_xin/dsh-workbuddy`。

@@ -27,7 +27,9 @@ const patterns = [
   ['账号 ID', '242483' + '0124'],
   ['积分余额', '1293' + '\\.50|367' + '\\.49|367' + '\\.53'],
   ['到期时间', '2026/11/16' + ' 21:17|2027/10/21' + ' 11:38'],
-  ['本机用户名', 'huai' + '_xin'],
+  // Only a path segment leaks the OS account name; the same string is the public
+  // npm scope in `@huai_xin/dsh-workbuddy`, which is meant to be here.
+  ['本机用户路径', '[\\\\/]huai' + '_xin'],
   ['中文用户目录', 'E:' + '\\\\\\\\用户|E:/' + '用户'],
   ['会话 id', 'session-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'],
   ['JWT', 'eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,}'],
@@ -49,12 +51,21 @@ const walk = (dir) => {
 }
 walk('')
 
+/**
+ * The maintainer's GitHub login and npm scope are public and must appear in
+ * repository URLs and install commands; only the same strings in any *other*
+ * context are leaks. Kept as one place so both scans agree.
+ */
+const allowedContext = /(github\.com\/|github:)2424830124|@huai_xin\/dsh-workbuddy|huai_xin@github/
+const isAllowed = (line) => allowedContext.test(line)
+
 // ---------- working tree ----------
 const treeHits = []
 for (const file of files) {
   if (/\.(png|webp|jpg|jpeg|gif|ico|tgz)$/i.test(file)) continue
   const text = readFileSync(join(root, file), 'utf8')
   text.split('\n').forEach((line, index) => {
+    if (isAllowed(line)) return
     for (const [label, pattern] of patterns) {
       if (new RegExp(pattern, 'i').test(line)) {
         treeHits.push({ label, where: `${file}:${index + 1}`, line: line.trim().slice(0, 130) })
@@ -70,16 +81,17 @@ const historyHits = []
 for (const [label, pattern] of patterns) {
   let output = ''
   try {
-    output = git('grep', '-I', '-c', '-E', '-i', pattern, ...revisions)
+    // `-n` (not `-c`) so each hit can be judged in context like the tree scan.
+    output = git('grep', '-I', '-n', '-E', '-i', pattern, ...revisions)
   } catch (error) {
     output = String(error.stdout ?? '')
   }
   for (const line of output.split('\n')) {
     if (line.trim().length === 0) continue
-    const match = /^([0-9a-f]{40}):([^:]+):(\d+)$/.exec(line.trim())
-    historyHits.push(match === null
-      ? { label, where: line.trim().slice(0, 80) }
-      : { label, where: `${match[2]} @${match[1].slice(0, 7)}`, count: Number(match[3]) })
+    const match = /^([0-9a-f]{40}):([^:]+):(\d+):(.*)$/.exec(line)
+    if (match === null) { historyHits.push({ label, where: line.trim().slice(0, 80) }); continue }
+    if (isAllowed(match[4])) continue
+    historyHits.push({ label, where: `${match[2]}:${match[3]}`, line: match[4].trim().slice(0, 130), revision: match[1].slice(0, 7) })
   }
 }
 
