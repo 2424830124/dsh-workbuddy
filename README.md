@@ -323,6 +323,35 @@ node test/live/policy-probe.mjs       # 两版白名单与准入结果对照
 - **模型不可用**：`code 11102 model [...] service info not found`（例如目录里列了但 CLI 渠道不服务的 `glm-4.6` 等）→ `INVALID_REQUEST`，不重试。
 - **额度/限流**：其他 429 → `RATE_LIMIT`；401/403 → 先续期再重试一次；5xx → `SERVER`。
 
+### 流式回答怎么算"正常结束"（2026-10-22 起）
+
+判据是机械的：**只有带 `finish_reason`（且流走到 `data: [DONE]`）或交付了工具调用，才算正常结束**；其余一律视为异常，并按下表处理。这样处理的起因是一次真实故障排查：模型"话说一半就停"看起来像正常结束，实际可能是连接被掐断，而旧实现把它当成了 `stop` → 既不报错也不重试。
+
+| 上游怎么结束 | 插件上报 | harness 会做什么 | 日志里能看到 |
+| --- | --- | --- | --- |
+| 没有 `finish_reason`、也没有 `[DONE]`（连接被掐断） | `TRANSPORT` 错误 | **自动退避重试**（默认策略含 `TRANSPORT`） | `… 的响应在 finish_reason/[DONE] 之前中断（收到 … kB，用时 …s，最后一段数据在 …s 前，中断时正在输出思考；可重试的传输错误）` |
+| 同样的断流，但断在工具调用参数中间 | `TRANSPORT` 错误 | 自动重试 | `… 的工具调用参数在传输中被截断（…）` |
+| `[DONE]` 但全程没有 `finish_reason` | `stop`（+ 记一笔） | 正常结束 | `… 的响应以 [DONE] 收尾但没有 finish_reason，按 stop 处理（输出 N tokens）` |
+| 输出打满预算 / 工具参数被输出上限截断 | `max-tokens` | 由 harness 决定续跑 | `… 的输出达到上限，本步被截断（输出 N tokens）` |
+| 正常 `stop` / `tool_calls` | 原样 | 正常 | 无 |
+
+重试本身由 harness 执行，插件只是把它记进日志：
+
+```
+[workbuddy] intl: 第 2/5 次重试（TRANSPORT） — 上游没有给出结束原因就断开了响应…；2.1s 后重试
+```
+
+另外每个 finish 帧都带一个 `response` 诊断块（`provider` / `model` / `responseId` / `stopReason` / `outputTokens` / `blocks`），会话数据诊断里会原样显示，方便一眼看出"这一步是谁答的、上游叫它什么 id"。它不是 harness 的契约字段，harness 不会据此改变行为。
+
+排查用探针：
+
+```powershell
+node test/live/stream-cut-probe.mjs cn --selftest     # 离线验证"断流"分类
+node test/live/stream-cut-probe.mjs intl 10 --long    # 真实压测断流率（免费模型零消耗）
+node test/live/find-message.mjs "关键词" <会话前缀>     # 按文本定位某一步，并打出前后事件
+node test/live/dump-stream.mjs <会话前缀> <seq,…>      # 打印那一步存下来的原始流帧
+```
+
 ## 许可
 
 MIT，见 [`LICENSE`](LICENSE)。再次说明：本项目为第三方非官方插件，与腾讯 / WorkBuddy 无关联。

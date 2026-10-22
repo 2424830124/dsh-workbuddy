@@ -69,6 +69,11 @@ test/live/          需要真实账号的在线探针与诊断脚本
    的是"话说一半就停了，还不重试"，而且日志里什么都没有。同理，**参数被截断的工具调用不要
    交付**（它是坏 JSON，交出去只会变成工具解析错误）：丢掉它并报 `max-tokens`，让 harness
    自己续跑该步骤（协议文档 §4.5）。
+10. **finish 帧必须带 `response` 诊断块**（`kind`/`version`/`api`/`provider`/`model`/`responseId`/
+    `stopReason`/`outputTokens`/`blocks`），由 `finishChunk()` 统一生成 —— **所有** finish 出口都走它。
+   它不是 harness 的契约字段（`dsh-llm` 类型里没有 `response`/`stopReason`），纯属遥测：会话数据
+   诊断会原样显示，用来回答"这一步是谁答的、上游 id 是什么"。不要绕过 `finishChunk()` 手写
+   `{type:'finish'}`，那样诊断里就只剩一个 `reason`，排查时又得从 `request/header` 反推。
 
 ## 开发流程
 
