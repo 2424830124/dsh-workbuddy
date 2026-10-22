@@ -839,6 +839,39 @@ provider 与全部 HTTP 路由都没注册，设置面板只剩一个 `HTTP 404`
 
 ---
 
+## 12. 与官方客户端、DSH 的请求处理对照（2026-10-22）
+
+官方客户端不是网页版：`www.workbuddy.cn` / `www.workbuddy.ai` 的 bundle 里**没有**聊天逻辑
+（只有站点壳，实测抓了入口 + 28 个懒加载 chunk，`chat/completions`、`finish_reason` 全部 0 命中）。
+真正的客户端是 CLI：`@tencent-ai/codebuddy-code`（2.172.1，59 MB，`dist/codebuddy.js` 28 MB）。
+下面这张表来自读它的 bundle（`mapFinishReasonToStopReason`、请求体组装处）。
+
+| 方面 | 官方 CLI | 本插件 | DSH |
+| --- | --- | --- | --- |
+| 端点 | 自定义/默认 URL + `/chat/completions`（CN 默认即 `copilot.tencent.com` ✓ 我们早就在用） | CN `copilot.tencent.com/v2/chat/completions`，失败回退 `workbuddy.cn`；INTL `workbuddy.ai/v2/chat/completions` | 由适配器注册的 provider 决定 |
+| `temperature` / `top_p` / `frequency_penalty` / `presence_penalty` | **总是发**（模型配置值，缺省用 `DEFAULT_TEMPERATURE`） | **不发**（仅当调用方传 `options.temperature`） | 类型里有 `LlmCallControls.temperature`，但没有设置入口 ⇒ 实际永远为空 |
+| `max_tokens` | 总是发（模型配置） | 发（调用方 `maxTokens`，否则目录 `maxOutputTokens`） | 提供 `maxTokens` |
+| `tool_choice` / `parallel_tool_calls` | 发 | 不发（走服务端默认 `auto`） | — |
+| `stream_options: {include_usage:true}` | **发** | **2026-10-22 起补上**（此前不发，网关可能不回 `usage`） | — |
+| `prompt_cache_key` | **不发** | 发（会话级，前缀缓存命中率才不为 0） | — |
+| `finish_reason` 映射 | `content_filter`/`refusal`→`refusal`；`length`/`max_tokens`→`max_tokens`；`stop`/`end_turn`/`stop_sequence`/`tool_calls`/`tool_use`/`function_call`→`end_turn`；未知→不归类 | **2026-10-22 起对齐**：`refusal`/`content_filter`→不可重试的 `INVALID_REQUEST` 错误；`error`→`TRANSPORT`（可重试）；`end_turn`/`stop_sequence`→`stop`；`tool_use`/`function_call`→`tool-calls`；未知值记日志后按 `stop` | 只有 `stop`/`tool-calls`/`max-tokens`/`aborted`/`error` 五类，**没有 refusal** |
+| `finish_reason=error` | 抛 `provider_finish_reason_error`（`model_service`） | 现在报 `TRANSPORT`，交给重试 | — |
+| 空流 / 占位帧 | `is_empty_stream`、placeholder-only 检测 | `EMPTY_RESPONSE` | — |
+| 流空闲监控 | `setInterval` + `streamIdleTimeoutMs`（日志 `Stream idle monitor armed`） | **没有**（依赖 harness 自身超时） | 无 |
+| 请求体改写 | 模型不支持工具时 `stripToolDefinitions`（连 `tool_choice` 一起去掉）、图片扁平化、自定义模型 URL 规整 | CN：系统提示词指纹改写（`Illegal API invocation`）+ 换会话标识重试一次 | — |
+
+三条结论：
+
+1. **我们和官方在"结束原因"上原本差一张表** —— 官方把 `refusal`/`content_filter` 单独归类、
+   把 `error` 当服务错误；我们此前只有 `stop`/`length`/`tool_calls`，其余全落进 `stop`。
+   后果就是：**上游拒绝或过滤时，表现和"模型自己说完了"完全一样** —— 已按上表对齐。
+2. **`stream_options.include_usage` 官方一直带**，我们漏了；补上后 `usage` 更可靠（诊断里的
+   `outputTokens` 也才有据可依）。
+3 . **`prompt_cache_key` 是反向差异**：官方不发，我们发。它只影响前缀缓存命中，不影响语义，
+   留着（会话级稳定值，命中率实测有效）。
+
+---
+
 ## 附：本仓库可复用的抓取脚本
 
 | 脚本 | 用途 |

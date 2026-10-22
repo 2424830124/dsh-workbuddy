@@ -250,4 +250,45 @@ assert.ok(
   'a tool call with truncated arguments is not handed over — it cannot be executed'
 )
 
+// `finish_reason` carries more values than the three the docs mention, and the
+// official CodeBuddy CLI maps the whole set. A refusal must not read as a stop.
+const runWithFinishReason = async (finishReason) => {
+  const adapter = new WorkBuddyAdapter({
+    logger: { info: () => {}, warn: () => {}, error: () => {} },
+    credentials: { resolve: async () => ({ value: 'header.payload.signature' }) },
+    get: () => undefined
+  }, REGIONS.cn)
+  adapter.catalog = []
+  adapter.catalogAt = Date.now()
+  globalThis.fetch = async () => streamOf([
+    'data: {"choices":[{"delta":{"content":"我无法"}}]}',
+    `data: {"choices":[{"delta":{},"finish_reason":"${finishReason}"}]}`,
+    'data: [DONE]',
+    ''
+  ].join('\n\n'))
+  const chunks = await collect(adapter)
+  return chunks.find((chunk) => chunk.type === 'finish').reason
+}
+
+const refusal = await runWithFinishReason('refusal')
+assert.equal(refusal.kind, 'error', 'a refusal is not a stop')
+assert.equal(refusal.failure.code, 'INVALID_REQUEST', 'a refusal is not retryable')
+assert.match(refusal.failure.message, /拒绝|过滤/)
+
+const filtered = await runWithFinishReason('content_filter')
+assert.equal(filtered.kind, 'error', 'content_filter is not a stop either')
+
+const providerError = await runWithFinishReason('error')
+assert.equal(providerError.kind, 'error')
+assert.equal(providerError.failure.code, 'TRANSPORT', 'finish_reason=error is retryable')
+
+const endTurn = await runWithFinishReason('end_turn')
+assert.equal(endTurn.kind, 'stop', 'end_turn is the other spelling of stop')
+
+const toolUse = await runWithFinishReason('tool_use')
+assert.equal(toolUse.kind, 'tool-calls', 'tool_use is the Anthropic spelling of tool_calls')
+
+// The official client asks for usage explicitly; the request body must match.
+assert.deepEqual(cn.buildBody({ model: 'hy3', messages: [] }, 'hy3', { id: 'hy3', name: 'Hy3', input: ['text'] }, undefined).stream_options, { include_usage: true })
+
 console.log('adapter.mjs: OK — sanitizer, body assembly, routes, queue failure, and stream endings verified')

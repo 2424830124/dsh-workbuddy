@@ -643,6 +643,10 @@ export class WorkBuddyAdapter {
       model,
       messages,
       stream: true,
+      // The official client asks for the usage frame explicitly; without it the
+      // gateway may omit `usage` on some routes, which costs the panel its token
+      // counts and the diagnostics their output-token line.
+      stream_options: { include_usage: true },
       // Server-side prefix cache: without this field the hit rate is always 0.
       prompt_cache_key: this.sessionId
     }
@@ -1005,9 +1009,38 @@ export class WorkBuddyAdapter {
       yield finishChunk({ kind: 'error', failure: { message: '模型返回了空响应', code: 'EMPTY_RESPONSE' } })
       return
     }
-    const reason = finishReason === 'tool_calls' || toolOrder.length > 0
+    // `finish_reason` has more values than the three the OpenAI docs mention, and
+    // the official CodeBuddy CLI maps the whole set (`mapFinishReasonToStopReason`
+    // in its bundle): `refusal` / `content_filter` are their own outcome, not a
+    // stop, and `error` means the provider gave up mid-answer. Mapping those to
+    // `stop` is how a refusal and a real finish became indistinguishable here.
+    const refusalReason = finishReason === 'refusal' || finishReason === 'content_filter'
+    if (refusalReason) {
+      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的上游拒绝/过滤了本次回答（finish_reason=${finishReason}），不重试`)
+      yield finishChunk({
+        kind: 'error',
+        failure: {
+          message: `${this.region.provider}: 上游拒绝或按内容策略过滤了本次回答（finish_reason=${finishReason}），请换个说法或换个模型`,
+          code: 'INVALID_REQUEST'
+        }
+      })
+      return
+    }
+    if (finishReason === 'error') {
+      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的上游以 finish_reason=error 结束，按传输错误上报，可自动重试`)
+      yield finishChunk({
+        kind: 'error',
+        failure: {
+          message: `${this.region.provider}: 上游在回答中途返回了错误（finish_reason=error；可重试的传输错误）`,
+          code: 'TRANSPORT'
+        }
+      })
+      return
+    }
+    const toolReason = finishReason === 'tool_calls' || finishReason === 'tool_use' || finishReason === 'function_call'
+    const reason = toolReason || toolOrder.length > 0
       ? { kind: 'tool-calls' }
-      : finishReason === 'length'
+      : finishReason === 'length' || finishReason === 'max_tokens'
         ? { kind: 'max-tokens' }
         : { kind: 'stop' }
     // Two endings are complete-looking but are not the model choosing to stop, and
@@ -1018,6 +1051,10 @@ export class WorkBuddyAdapter {
       this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的输出达到上限，本步被截断（输出 ${outputTokens ?? '未知'} tokens）`)
     } else if (reason.kind === 'stop' && finishReason === undefined) {
       this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的响应以 [DONE] 收尾但没有 finish_reason，按 stop 处理（输出 ${outputTokens ?? '未知'} tokens）`)
+    } else if (reason.kind === 'stop' && !['stop', 'end_turn', 'stop_sequence'].includes(finishReason)) {
+      // An unknown value is worth seeing: the official client leaves the stop
+      // reason at its default for these too, so nobody upstream has classified them.
+      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 返回了未识别的 finish_reason=${finishReason}，按 stop 处理`)
     }
     yield finishChunk(reason)
   }
