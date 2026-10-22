@@ -311,6 +311,38 @@ for (const expected of ['账户', '大陆版', '海外版', '示例账号', '可
 }
 assert.ok(titlesOf(signedInTree).some((title) => title.startsWith('繁忙程度：')), 'the load tag explains itself in a tooltip')
 
+/** Find actual rendered elements without invoking a second renderer. */
+const nodesOf = (node, out = []) => {
+  if (Array.isArray(node)) { for (const child of node) nodesOf(child, out); return out }
+  if (node === null || typeof node !== 'object') return out
+  if (node.type !== undefined) out.push(node)
+  for (const child of node.children ?? []) nodesOf(child, out)
+  return out
+}
+const hasClass = (node, name) => String(node.props?.className ?? '').split(/\s+/).includes(name)
+const accountCard = nodesOf(signedInTree).find((node) => hasClass(node, 'wb-account-card'))
+assert.ok(accountCard, 'the account card has its own styling scope')
+const accountNodes = nodesOf(accountCard)
+const deploymentHeads = accountNodes.filter((node) => hasClass(node, 'wb-deploy'))
+assert.deepEqual(deploymentHeads.map((node) => node.props.style.gridColumn), [2, 3], 'deployments occupy the two account columns')
+assert.ok(textsOf(deploymentHeads[0]).includes('大陆版'))
+assert.ok(textsOf(deploymentHeads[1]).includes('海外版'))
+const creditActions = accountNodes.filter((node) => hasClass(node, 'wb-cell-actions'))
+assert.equal(creditActions.length, 2, 'each balance keeps its own refresh and plans controls')
+for (const actions of creditActions) {
+  const buttons = nodesOf(actions).filter((node) => node.type === 'button')
+  assert.equal(buttons.length, 2)
+  assert.equal(buttons[0].props['aria-label'], '刷新积分')
+  assert.ok(textsOf(buttons[1]).includes('套餐'))
+  assert.ok(buttons.every((node) => typeof node.props.onClick === 'function'))
+}
+assert.equal(accountNodes.filter((node) => node.type === 'button' && textsOf(node).includes('续期')).length, 1)
+const stylesheet = textsOf(nodesOf(signedInTree).find((node) => node.type === 'style')).join('')
+assert.match(stylesheet, /grid-template-columns: 56px repeat\(var\(--wb-cols\), minmax\(180px, 1fr\)\)/, 'account columns fill the card without an empty trailing column')
+assert.match(stylesheet, /grid-template-rows: repeat\(4, 52px\) 34px/, 'only the action row is compacted')
+assert.match(stylesheet, /\.wb-table-split::before \{[^}]*position: absolute; left: 50%;/, 'the divider is centred on the card without shifting account columns')
+assert.match(stylesheet, /\.wb-cell-actions \{ flex: none;/, 'balance actions stay beside the number rather than against the far edge')
+
 // 2) Signed out: the sign-in path, and no stale account values.
 installFetch({ state: signedOutState, models: [] })
 const signedOutTree = await renderPanel()

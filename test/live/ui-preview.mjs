@@ -171,11 +171,11 @@ const accountCard = (accounts) => {
         <span class="wb-cell-actions">
           <button type="button" class="wb-icon-btn" title="刷新积分">⟳</button>
           <button type="button" class="wb-link-btn" title="在浏览器打开该部署的官方套餐页（用量与订阅）">套餐</button>
-        </span>`))
+        </span>`, false, ' wb-td-credits'))
     cells.push(cell(3, `<button type="button" class="wb-btn wb-btn-primary">更换账号</button>
         <button type="button" class="wb-btn wb-btn-danger">退出登录</button>`, true))
   })
-  return `<div class="wb-card">
+  return `<div class="wb-card wb-account-card">
     <div class="wb-card-head">
       <span class="wb-logo" aria-hidden="true"></span>
       <span class="wb-card-title">账户</span>

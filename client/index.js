@@ -242,6 +242,11 @@ window.__ModuleLoader__.load({
 .wb-card + .wb-card { margin-top: 16px; }
 .wb-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 14px 16px 12px; }
 .wb-card-title { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--wb-muted); }
+.wb-account-card { border-radius: 12px; border-color: var(--wb-line-soft); }
+.wb-account-card .wb-card-head { gap: 10px; }
+.wb-account-card .wb-card-title { letter-spacing: 0; text-transform: none; color: var(--wb-text); }
+.wb-account-card .wb-btn { border-radius: 6px; }
+.wb-account-card .wb-card-head .wb-btn { min-width: 52px; }
 .wb-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px 12px; }
 /* The mark is a mask painted with the accent colour: one asset, both themes. */
 .wb-logo { flex: none; width: 30px; height: 30px; display: block; background: var(--wb-accent-strong);
@@ -251,40 +256,33 @@ window.__ModuleLoader__.load({
 /* account table — transposed: deployments are columns, fields are rows ------
    One grid for the whole table so a signed-out deployment can occupy its whole
    column with a single centred sign-in button. */
-.wb-table { display: grid; padding: 0 12px 14px; overflow-x: auto; --wb-cols: 2; position: relative;
-  /* A label column on the left and an empty spacer of the same width on the
-     right: that is what makes the pair of deployment columns sit symmetrically
-     in the card instead of being pushed right by the labels. Centring keeps the
-     block in the middle once the columns hit their cap. */
-  /* The minimum keeps a row on one line; below that the table scrolls instead of
-     reflowing a row. Kept small because the balance row only ever holds the
-     number and its refresh. */
-  grid-template-columns: 56px repeat(var(--wb-cols), minmax(158px, 240px)) 56px;
-  justify-content: center;
-  /* Rows are a fixed height in every state, so the card does not change size
-     between "loading" and "signed in", and the separators line up. */
-  grid-auto-rows: 52px;
-  /* The gap is also the clearance on both sides of the separator drawn down the
-     middle, so it has to read as a division (about 16px of air per column) —
-     wide enough that the balance row's buttons never touch the line. */
+.wb-table { display: grid; position: relative; padding: 0 10px 8px; overflow-x: auto; --wb-cols: 2;
+  /* No trailing spacer: both accounts need enough width for an unbroken action
+     pair in the settings column. Narrower views scroll instead of wrapping. */
+  grid-template-columns: 56px repeat(var(--wb-cols), minmax(180px, 1fr));
+  /* Fixed tracks prevent account loading or login from resizing the card; the
+     action row needs less air than the four information rows above it. */
+  grid-template-rows: repeat(4, 52px) 34px;
   column-gap: 32px; row-gap: 0; align-items: stretch; }
-/* One continuous separator between the deployments, drawn down the middle of
-   the symmetric grid. It fades out at both ends, so it reads as a division of
-   the two accounts rather than a stray table border. */
-.wb-table-split::before { content: ''; position: absolute; left: 50%; top: 16px; bottom: 20px; width: 1px;
-  background: linear-gradient(to bottom, transparent, var(--wb-line) 14%, var(--wb-line) 86%, transparent); }
+/* Centre the divider on the card, not the account-column gap: the label
+   column makes that gap visually off-centre. Account contents stay in place. */
+.wb-table-split::before { content: ''; position: absolute; left: 50%; top: 18px; bottom: 8px; width: 1px;
+  transform: translateX(-50%); pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--wb-line-soft) 12%, var(--wb-line-soft) 92%, transparent); }
 .wb-row-label { display: flex; align-items: center; font-size: 11px; letter-spacing: .05em;
   text-transform: uppercase; color: var(--wb-muted); }
-.wb-th { display: flex; align-items: center; font-size: 12.5px; font-weight: 620; }
-.wb-th .wb-btn { padding: 3px 8px; font-size: 11px; font-weight: 500; margin-left: 2px; }
+.wb-th { min-width: 0; display: flex; align-items: center; font-size: 12.5px; font-weight: 620; white-space: nowrap; }
+.wb-th .wb-btn { padding: 3px 8px; font-size: 11px; font-weight: 500; line-height: 1.2; }
 .wb-deploy { display: flex; align-items: center; gap: 8px; }
 .wb-deploy-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
 /* The cell fills its row and holds its content left, the way the signed-in rows
    read; only the standalone sign-in cell is centred. No rule between rows: the
    spacing and the vertical separator already say where the columns are. */
 .wb-td { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-/* The action pair of one cell, pinned to the right edge of its column. */
-.wb-cell-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 10px; }
+/* Keep refresh and plans beside the balance, not at the far column edge. */
+.wb-cell-actions { flex: none; display: inline-flex; align-items: center; gap: 8px; }
+.wb-td-credits, .wb-td-last { flex-wrap: nowrap; }
+.wb-td-last { gap: 6px; }
 .wb-td-span { display: flex; align-items: center; justify-content: center; }
 .wb-account-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-num { font-variant-numeric: tabular-nums; color: var(--wb-muted); }
@@ -301,8 +299,8 @@ window.__ModuleLoader__.load({
   cursor: pointer; border: 1px solid var(--wb-line-soft); background: transparent; color: var(--wb-muted);
   white-space: nowrap; transition: background .15s, color .15s, border-color .15s; }
 .wb-link-btn:hover { background: var(--wb-accent-soft); color: var(--wb-accent-strong); border-color: transparent; }
-.wb-td .wb-btn { display: inline-flex; align-items: center; justify-content: center;
-  padding: 5px 10px; font-size: 11.5px; min-width: 78px; }
+.wb-td .wb-btn { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;
+  padding: 4px 10px; font-size: 11.5px; min-width: 78px; min-height: 26px; white-space: nowrap; }
 .wb-td-span .wb-btn { padding: 7px 16px; }
 
 /* tab strip: two equal halves, the selected one a tinted segment ------------- */
@@ -1197,9 +1195,8 @@ window.__ModuleLoader__.load({
             entry.credits !== null && entry.credits !== undefined && entry.credits.ok === true
               ? h('span', { key: 'value', className: 'wb-credits-value' }, formatCredits(entry.credits.total))
               : h('span', { key: 'value', className: 'wb-muted' }, t('unknown')),
-            // The number stays on the left edge (it lines up with the account and
-            // expiry values above); both actions sit against the column's right
-            // edge, so they never crowd the figure and always read as controls.
+            // All values share a left edge; the quiet balance actions follow
+            // the figure directly so each deployment reads as one compact group.
             h('span', { key: 'actions', className: 'wb-cell-actions' }, [
               h('button', {
                 key: 'refresh',
@@ -1220,7 +1217,7 @@ window.__ModuleLoader__.load({
                 onClick: () => void openPlans(entry.id)
               }, t('openPlans'))
             ])
-          ]))
+          ], 'wb-td-credits'))
           cells.push(cell(3, 'actions', accountActions(entry)))
         })
         return cells
@@ -1306,7 +1303,7 @@ window.__ModuleLoader__.load({
         error.length > 0 ? h('p', { className: 'wb-error', role: 'alert' }, error) : null,
 
         // Cards are separate concerns: who is signed in, and what they can run.
-        h('div', { className: 'wb-card' },
+        h('div', { className: 'wb-card wb-account-card' },
           h('div', { className: 'wb-card-head' },
             h(Logomark, null),
             h('span', { className: 'wb-card-title' }, t('cardAccounts')),
@@ -1324,8 +1321,8 @@ window.__ModuleLoader__.load({
             )
           ),
           h('div', {
-            // The separator between deployments is drawn once, down the middle
-            // of the symmetric grid, when there is exactly a pair of them.
+            // A single separator stays at the card's centre when there are
+            // exactly two deployments.
             className: regions.length === 2 ? 'wb-table wb-table-split' : 'wb-table',
             role: 'table',
             style: { '--wb-cols': String(Math.max(1, regions.length)) }
