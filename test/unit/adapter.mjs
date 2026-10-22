@@ -212,13 +212,22 @@ const complete = new WorkBuddyAdapter({
 complete.catalog = []
 complete.catalogAt = Date.now()
 globalThis.fetch = async () => streamOf([
-  'data: {"choices":[{"delta":{"content":"好了"}}]}',
-  'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+  'data: {"id":"chatcmpl-test-1","choices":[{"delta":{"content":"好了"}}]}',
+  'data: {"id":"chatcmpl-test-1","choices":[{"delta":{},"finish_reason":"stop"}]}',
   'data: [DONE]',
   ''
 ].join('\n\n'))
 const completeFinish = (await collect(complete)).find((chunk) => chunk.type === 'finish')
 assert.equal(completeFinish.reason.kind, 'stop', 'a normal ending still reads as stop')
+// The finish chunk carries its own diagnostics: the session shows this block
+// verbatim, which is how "who answered, and what did upstream call it" is answered
+// without reconstructing it from the request headers.
+assert.equal(completeFinish.response.kind, 'workbuddy')
+assert.equal(completeFinish.response.provider, 'workbuddy-cn')
+assert.equal(completeFinish.response.model, 'hy3')
+assert.equal(completeFinish.response.responseId, 'chatcmpl-test-1')
+assert.equal(completeFinish.response.stopReason, 'stop')
+assert.deepEqual(completeFinish.response.blocks, [{ type: 'text' }])
 
 const budget = new WorkBuddyAdapter({
   logger: { info: () => {}, warn: () => {}, error: () => {} },

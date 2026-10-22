@@ -789,6 +789,31 @@ export class WorkBuddyAdapter {
     let lastDelta = '无内容'
     /** Output tokens the last usage frame reported, for the truncation log. */
     let outputTokens
+    /** The gateway's own response id, for correlating with upstream logs. */
+    let responseId
+    /**
+     * The finish chunk's diagnostics block.
+     *
+     * Not part of the harness contract — the other adapters attach their own and
+     * the session diagnostics show it verbatim, which is how a "who answered this,
+     * and what did upstream call it" question gets answered without reconstructing
+     * it from the request headers. Carries nothing the harness acts on.
+     */
+    const finishChunk = (reason) => ({
+      type: 'finish',
+      reason,
+      response: {
+        kind: 'workbuddy',
+        version: 1,
+        api: 'openai-completions',
+        provider: this.region.provider,
+        model: options.model,
+        ...(responseId === undefined ? {} : { responseId }),
+        stopReason: finishReason ?? reason.kind,
+        ...(outputTokens === undefined ? {} : { outputTokens }),
+        blocks: blocks.map((block) => ({ type: block.kind }))
+      }
+    })
 
     const textBlock = () => {
       let block = blocks.find((candidate) => candidate.kind === 'text')
@@ -838,6 +863,7 @@ export class WorkBuddyAdapter {
           }
           const choice = data.choices?.[0]
           const delta = choice?.delta
+          if (responseId === undefined && typeof data.id === 'string' && data.id.length > 0) responseId = data.id
           if (typeof choice?.finish_reason === 'string' && choice.finish_reason.length > 0) finishReason = choice.finish_reason
 
           if (typeof delta?.content === 'string' && delta.content.length > 0) {
@@ -946,31 +972,25 @@ export class WorkBuddyAdapter {
     if (!streamEnded && finishReason === undefined) {
       const detail = describeCut({ receivedBytes, startedAt, lastDataAt, lastDelta })
       this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的响应在 finish_reason/[DONE] 之前中断（${detail}），按传输错误上报，可自动重试`)
-      yield {
-        type: 'finish',
-        reason: {
-          kind: 'error',
-          failure: {
-            message: `${this.region.provider}: 上游没有给出结束原因就断开了响应（${detail}；可重试的传输错误）`,
-            code: 'TRANSPORT'
-          }
+      yield finishChunk({
+        kind: 'error',
+        failure: {
+          message: `${this.region.provider}: 上游没有给出结束原因就断开了响应（${detail}；可重试的传输错误）`,
+          code: 'TRANSPORT'
         }
-      }
+      })
       return
     }
     if (argsTruncated && !streamEnded) {
       const detail = describeCut({ receivedBytes, startedAt, lastDataAt, lastDelta })
       this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的工具调用参数在传输中被截断（${detail}），按传输错误上报，可自动重试`)
-      yield {
-        type: 'finish',
-        reason: {
-          kind: 'error',
-          failure: {
-            message: `${this.region.provider}: 工具调用的参数在传输中被截断（${detail}；可重试的传输错误）`,
-            code: 'TRANSPORT'
-          }
+      yield finishChunk({
+        kind: 'error',
+        failure: {
+          message: `${this.region.provider}: 工具调用的参数在传输中被截断（${detail}；可重试的传输错误）`,
+          code: 'TRANSPORT'
         }
-      }
+      })
       return
     }
     // Truncated arguments are checked before the empty-response rule: a step whose
@@ -978,11 +998,11 @@ export class WorkBuddyAdapter {
     // that "empty" would hide what happened.
     if (argsTruncated) {
       this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的工具调用参数被输出上限截断，本步按 max-tokens 上报（harness 可续跑）`)
-      yield { type: 'finish', reason: { kind: 'max-tokens' } }
+      yield finishChunk({ kind: 'max-tokens' })
       return
     }
     if (blockCount === 0) {
-      yield { type: 'finish', reason: { kind: 'error', failure: { message: '模型返回了空响应', code: 'EMPTY_RESPONSE' } } }
+      yield finishChunk({ kind: 'error', failure: { message: '模型返回了空响应', code: 'EMPTY_RESPONSE' } })
       return
     }
     const reason = finishReason === 'tool_calls' || toolOrder.length > 0
@@ -999,7 +1019,7 @@ export class WorkBuddyAdapter {
     } else if (reason.kind === 'stop' && finishReason === undefined) {
       this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的响应以 [DONE] 收尾但没有 finish_reason，按 stop 处理（输出 ${outputTokens ?? '未知'} tokens）`)
     }
-    yield { type: 'finish', reason }
+    yield finishChunk(reason)
   }
 }
 

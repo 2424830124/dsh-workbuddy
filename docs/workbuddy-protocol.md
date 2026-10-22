@@ -248,6 +248,11 @@ data: [DONE]
   频率实测工具：`node test/live/stream-cut-probe.mjs [cn|intl] [次数] [模型] [--long] [--selftest]`
   （2026-10-22 实测：大陆版短问答 4/4 正常、海外版 `deepseek-v4.1-flash` 长回答 10/10 正常，
   即断流是间歇性的，常规探测不易复现）
+- **finish 帧带一个 `response` 诊断块**（`kind`/`version`/`api`/`provider`/`model`/`responseId`/
+  `stopReason`/`outputTokens`/`blocks`）。它不是 harness 的契约字段（`dsh-llm` 的类型里没有
+  `response` / `stopReason`），纯属遥测：会话诊断里会原样显示，用来一眼回答"这一步是谁答的、
+  上游叫它什么 id"，不必再从 `request/header` 反推。`responseId` 取自上游流里的 `id`
+  （形如 `chatcmpl-…`），可以直接和上游日志对账；harness 不会据此改变行为 ✅
 - `usage`（末帧携带）：`prompt_tokens` / `completion_tokens` / `total_tokens` / `prompt_tokens_details.cached_tokens` / `completion_tokens_details.reasoning_tokens` / `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` / `credit` ✅
 
 ---
