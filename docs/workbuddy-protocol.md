@@ -930,6 +930,8 @@ provider 与全部 HTTP 路由都没注册，设置面板只剩一个 `HTTP 404`
 | `test/live/long-context-probe.mjs [次数] [模型]` | 只改上下文长度，看提前收尾率（可复现的对照实验） |
 | `test/live/context-size-probe.mjs [字符数…]` | 填充上下文实际值多少 token（网关 `inputTokens` 为准） |
 | `test/live/thinking-field-probe.mjs [次数] [模型] [部署]` | 带/不带 `thinking` 字段时思考量对比（档位才是开关） |
+| `test/live/dsh-prompt-probe.mjs [次数] [字符数…]` | **用会话里存的 DSH 原版系统提示词** + 真实 70 工具集跑长上下文，看会不会调用工具（2026-10-23：0k/90k/280k 各 3 次，9/9 都调用 `read`） |
+| `test/live/system-prompt-probe.mjs [次数]` | 判定上游是否注入/覆盖 system：两个代号实验 + 不给 system 时它自认是谁（答「DeepSeek」= 无厂商注入）+ 语言服从性 |
 | `test/live/request-structure.mjs` / `test/live/free-models.mjs` | 各厂商请求结构、免费档清单的逐字段试探 |
 | `test/live/verify-policy.mjs` | 实时目录扣掉台账里 `dead` 的判定后，两版的条目数对照 |
 | **契约与 UI 参考（写 UI 插件用）** | |
