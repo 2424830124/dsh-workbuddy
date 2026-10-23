@@ -1378,7 +1378,10 @@ window.__ModuleLoader__.load({
                 value: query,
                 placeholder: t('search'),
                 'aria-label': t('search'),
-                disabled: rows.length === 0,
+                // Keyed on what the region *has*, not on what the query matched: with
+                // the filtered list a zero-match search disabled its own input and the
+                // only way out was closing the panel.
+                disabled: (models?.list ?? []).length === 0,
                 onChange: (event) => setSearches((current) => ({ ...current, [region.id]: event.target.value }))
               })),
             h('button', {

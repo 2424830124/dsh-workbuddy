@@ -63,6 +63,43 @@ assert.ok(!/powered by deepseek harness/i.test(body.messages[0].content))
 assert.equal(body.messages.length, 3, 'request system + history system + user')
 assert.ok(!/powered by deepseek harness/i.test(body.messages[1].content), 'a history system message is sanitized too')
 
+// The harness answers a tool call with a message of its own:
+//   { role: 'tool', source: { kind: 'tool', callId }, content: [...] }
+// Converting that to a plain user message loses which call it answers, so the tool
+// role and the call id have to survive the conversion.
+const harnessTranscript = cn.buildBody({
+  model: 'hy3',
+  system: 'You are helpful.',
+  messages: [
+    { role: 'user', content: [{ type: 'text', text: '改一下文件' }] },
+    {
+      role: 'assistant',
+      content: [
+        { type: 'text', text: '好' },
+        { type: 'tool-call', id: 'call_1', name: 'write', arguments: '{"file_path":"a.txt","content":"b"}' }
+      ]
+    },
+    { role: 'tool', source: { kind: 'tool', callId: 'call_1' }, content: [{ type: 'text', text: 'written' }] }
+  ]
+}, 'hy3', undefined, undefined)
+const toolMessage = harnessTranscript.messages.find((message) => message.role === 'tool')
+assert.ok(toolMessage !== undefined, 'a tool result stays a tool message')
+assert.equal(toolMessage.tool_call_id, 'call_1', 'and keeps the call id it answers')
+assert.equal(toolMessage.content, 'written')
+const assistantWithCall = harnessTranscript.messages.find((message) => Array.isArray(message.tool_calls))
+assert.equal(assistantWithCall.tool_calls[0].id, 'call_1', 'the call survives because its result was found')
+assert.ok(
+  !harnessTranscript.messages.some((message) => message.role === 'user' && message.content === 'written'),
+  'the tool output is not promoted to a user message'
+)
+// `developer` messages read as system to the wire.
+const developerBody = cn.buildBody({
+  model: 'hy3',
+  system: 'You are helpful.',
+  messages: [{ role: 'developer', content: [{ type: 'text', text: 'dev rules' }] }]
+}, 'hy3', undefined, undefined)
+assert.ok(developerBody.messages.some((message) => message.role === 'system' && message.content === 'dev rules'))
+
 // China chats through the CodeBuddy China gateway; the web host stays as fallback.
 const routes = cn.routes()
 assert.equal(routes[0].endpoint, 'https://copilot.tencent.com')
@@ -265,6 +302,57 @@ const refusalStop = await runRounds([
 ])
 assert.equal(refusalStop.calls, 1, 'a refusal is not retried')
 assert.equal(refusalStop.chunks.at(-1).reason.kind, 'error')
+
+// The ending is classified before the empty-response fallback: a refusal with no text
+// is a refusal (not retryable), and a budget end with no deliverable content is
+// max-tokens (the harness continues those), not an empty answer.
+const emptyRefusal = await runRounds([
+  'data: {"choices":[{"delta":{},"finish_reason":"refusal"}]}\n\n'
+    + 'data: [DONE]\n\n'
+])
+assert.equal(emptyRefusal.chunks.at(-1).reason.kind, 'error')
+assert.equal(emptyRefusal.chunks.at(-1).reason.failure.code, 'INVALID_REQUEST', 'an empty refusal is still not retryable')
+
+const emptyBudget = await runRounds([
+  'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n'
+    + 'data: [DONE]\n\n'
+])
+assert.equal(emptyBudget.chunks.at(-1).reason.kind, 'max-tokens', 'an empty budget end continues the step')
+
+// A body that throws while being read is a transport failure, not an UNKNOWN error.
+const brokenBody = new WorkBuddyAdapter({
+  logger: { info: () => {}, warn: () => {}, error: () => {} },
+  credentials: { resolve: async () => ({ value: 'header.payload.signature' }) },
+  get: () => undefined
+}, REGIONS.cn)
+brokenBody.catalog = []
+brokenBody.catalogAt = Date.now()
+globalThis.fetch = async () => new Response(new ReadableStream({
+  start(controller) {
+    controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"半句"}}]}\n\n'))
+    controller.error(new TypeError('terminated'))
+  }
+}), { status: 200, headers: { 'content-type': 'text/event-stream' } })
+const brokenChunks = await collect(brokenBody)
+assert.equal(brokenChunks.at(-1).reason.kind, 'error', 'a network break ends with an error frame')
+assert.equal(brokenChunks.at(-1).reason.failure.code, 'TRANSPORT', 'and is retryable instead of UNKNOWN')
+
+// A tool call whose arguments are cut short must not be handed over — not even as a
+// delta, because the assembler keeps an open tool block from the first delta.
+const cutToolCall = await runRounds([
+  'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_9","function":{"name":"write","arguments":"{\\"file_path\\":\\"exa"}}]}}]}\n\n'
+    + 'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n'
+    + 'data: [DONE]\n\n'
+])
+assert.equal(cutToolCall.chunks.at(-1).reason.kind, 'max-tokens')
+assert.ok(
+  !cutToolCall.chunks.some((chunk) => chunk.type === 'tool-call-delta'),
+  'a truncated call emits no delta at all'
+)
+assert.ok(
+  !cutToolCall.chunks.some((chunk) => chunk.type === 'block-end' && chunk.block?.type === 'tool-call'),
+  'and no block end'
+)
 
 const cut = new WorkBuddyAdapter({
   logger: { info: () => {}, warn: () => {}, error: () => {} },

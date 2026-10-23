@@ -176,9 +176,25 @@ function isTruncatedArguments(raw) {
 const hasUsableToolName = (name) => typeof name === 'string' && name.trim().length > 0
 
 /** Keep only tool call/result pairs that are complete on both sides. */
+/**
+ * The call id a result message answers.
+ *
+ * The harness answers a call with a message of its own: `{ role: 'tool', source: {
+ * kind: 'tool', callId } }`. Older transcripts put the result inside the content
+ * blocks as `{ type: 'tool-result', toolCallId }`; both are read here so neither
+ * shape loses its pairing.
+ */
+function toolResultCallId(message) {
+  if (message?.role !== 'tool') return undefined
+  const id = message.source?.callId ?? message.toolCallId ?? message.tool_call_id
+  return id === undefined || id === null ? undefined : String(id)
+}
+
 function resolveToolPairing(messages) {
   const allResultIds = new Set()
   for (const message of messages) {
+    const standalone = toolResultCallId(message)
+    if (standalone !== undefined) { allResultIds.add(standalone); continue }
     for (const block of Array.isArray(message.content) ? message.content : []) {
       if (block?.type === 'tool-result') allResultIds.add(String(block.toolCallId))
     }
@@ -261,9 +277,30 @@ function toWireMessages(messages, imageUrls) {
       })
       continue
     }
-    if (message.role === 'system') {
+    if (message.role === 'system' || message.role === 'developer') {
       flushToolImages()
       wire.push({ role: 'system', content: contentToText(message.content) })
+      continue
+    }
+    // A tool result arrives as a message of its own (see `toolResultCallId`); it must
+    // stay a `tool` message, or the model loses which call it answers.
+    const resultCallId = toolResultCallId(message)
+    if (resultCallId !== undefined) {
+      if (!keepResultIds.has(resultCallId)) continue
+      let resultText = '(no output)'
+      if (imageUrls !== undefined && Array.isArray(message.content)) {
+        const resultParts = userContentParts(message.content, imageUrls)
+        if (resultParts !== undefined) {
+          pendingToolImages.push(...resultParts.filter((part) => part.type !== 'text'))
+          const joined = resultParts.filter((part) => part.type === 'text').map((part) => String(part.text)).join('')
+          if (joined.length > 0) resultText = joined
+        } else {
+          resultText = contentToText(message.content) || '(no output)'
+        }
+      } else {
+        resultText = contentToText(message.content) || '(no output)'
+      }
+      wire.push({ role: 'tool', tool_call_id: resultCallId, content: resultText })
       continue
     }
 
@@ -1014,20 +1051,14 @@ export class WorkBuddyAdapter {
             lastDelta = '工具调用'
             const fragment = call.function?.arguments ?? ''
             block.text += fragment
+            // The arguments are collected, not streamed on: a call whose arguments are
+            // cut short must not reach the harness at all, and once a delta has been
+            // emitted there is no taking it back (the assembler keeps an open tool
+            // block). Complete calls are handed over in the block assembly below.
             if (!block.announced) {
               if (!hasUsableToolName(block.name)) continue
               block.announced = true
               toolOrder.push(block.index)
-              yield { type: 'block-start', index: block.index, blockType: 'tool-call' }
-              yield { type: 'tool-call-delta', index: block.index, id: callId, name: block.name, argumentsDelta: block.text }
-              continue
-            }
-            yield {
-              type: 'tool-call-delta',
-              index: block.index,
-              id: callId,
-              ...(block.name === undefined ? {} : { name: block.name }),
-              argumentsDelta: fragment
             }
           }
           if (data.usage !== undefined && data.usage !== null) {
@@ -1047,6 +1078,22 @@ export class WorkBuddyAdapter {
           }
         }
       }
+    } catch (error) {
+      // `reader.read()` throws on a real socket failure (undici reports
+      // `TypeError: terminated`). Left alone the harness classifies that as UNKNOWN and
+      // does not retry, so a connection reset mid-answer would fail instead of
+      // recovering. A user abort is different and is rethrown untouched.
+      if (options.signal?.aborted === true) throw error
+      const detail = describeCut({ receivedBytes, startedAt, lastDataAt, lastDelta })
+      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的响应在网络层中断（${detail}；${error instanceof Error ? error.message : String(error)}），按传输错误上报，可自动重试`)
+      yield finishChunk({
+        kind: 'error',
+        failure: {
+          message: `${this.region.provider}: 响应流在网络层中断（${detail}；可重试的传输错误）`,
+          code: 'TRANSPORT'
+        }
+      })
+      return
     } finally {
       reader.releaseLock()
     }
@@ -1058,9 +1105,12 @@ export class WorkBuddyAdapter {
       // A call whose arguments never finished arriving cannot be executed: handed
       // over, it becomes a parse error in the transcript instead of the truncation
       // that actually happened. It is reported as `max-tokens` below instead, so
-      // the step can be continued rather than failed.
+      // the step can be continued rather than failed. Its deltas were withheld above,
+      // so nothing reaches the assembler for it.
       if (isTruncatedArguments(block.text)) continue
       blockCount += 1
+      yield { type: 'block-start', index, blockType: 'tool-call' }
+      yield { type: 'tool-call-delta', index, id: block.callId, name: block.name, argumentsDelta: block.text }
       yield {
         type: 'block-end',
         index,
@@ -1138,15 +1188,15 @@ export class WorkBuddyAdapter {
       yield finishChunk({ kind: 'max-tokens' })
       return
     }
-    if (blockCount === 0) {
-      yield finishChunk({ kind: 'error', failure: { message: '模型返回了空响应', code: 'EMPTY_RESPONSE' } })
-      return
-    }
     // `finish_reason` has more values than the three the OpenAI docs mention, and
     // the official CodeBuddy CLI maps the whole set (`mapFinishReasonToStopReason`
     // in its bundle): `refusal` / `content_filter` are their own outcome, not a
     // stop, and `error` means the provider gave up mid-answer. Mapping those to
     // `stop` is how a refusal and a real finish became indistinguishable here.
+    //
+    // These are checked *before* the empty-response rule: a refusal or a provider
+    // error with no text is still a refusal or an error, and calling it
+    // `EMPTY_RESPONSE` invites a retry that would be answered the same way.
     const refusalReason = finishReason === 'refusal' || finishReason === 'content_filter'
     if (refusalReason) {
       this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的上游拒绝/过滤了本次回答（finish_reason=${finishReason}），不重试`)
@@ -1168,6 +1218,17 @@ export class WorkBuddyAdapter {
           code: 'TRANSPORT'
         }
       })
+      return
+    }
+    // A budget end with no text and no usable tool call is a truncation, not an empty
+    // answer: report `max-tokens` so the harness continues the step.
+    if (blockCount === 0) {
+      if (finishReason === 'length' || finishReason === 'max_tokens') {
+        this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 在输出上限处结束且没有可交付内容，本步按 max-tokens 上报（harness 可续跑）`)
+        yield finishChunk({ kind: 'max-tokens' })
+        return
+      }
+      yield finishChunk({ kind: 'error', failure: { message: '模型返回了空响应', code: 'EMPTY_RESPONSE' } })
       return
     }
     const toolReason = finishReason === 'tool_calls' || finishReason === 'tool_use' || finishReason === 'function_call'

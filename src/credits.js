@@ -122,7 +122,10 @@ export async function fetchCredits(ctx, region) {
   for (const entry of accounts) {
     if (typeof entry !== 'object' || entry === null) continue
     const active = packageActive(entry, now)
-    const remaining = preciseNumber(entry, 'CycleCapacityRemain') || preciseNumber(entry, 'CapacityRemain')
+    // A remaining balance of 0 is a real value: a spent package must not fall through
+    // to a second field (or read as a missing one) and make the account look funded.
+    const cycleRemain = preciseNumber(entry, 'CycleCapacityRemain')
+    const remaining = cycleRemain ?? preciseNumber(entry, 'CapacityRemain') ?? 0
     const grantedBy = attributeOf(entry, 'grantSource')
     if (!active) continue
     total += remaining
