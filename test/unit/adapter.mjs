@@ -39,9 +39,26 @@ assert.ok(sanitized.includes('You are a coding agent powered by the hy3 model. I
 assert.equal(cn.sanitizeSystem('you are an ai agent powered by deepseek harness'), 'You are an AI agent.')
 assert.equal(cn.sanitizeSystem('  You are an AI agent powered by DeepSeek Harness.  rest'), 'You are an AI agent.  rest')
 
-// Anything else is left alone.
-assert.equal(cn.sanitizeSystem('You are a coding agent powered by DeepSeek Harness.'), 'You are a coding agent powered by DeepSeek Harness.')
-assert.equal(cn.sanitizeSystem('Hello. You are an AI agent powered by DeepSeek Harness.'), 'Hello. You are an AI agent powered by DeepSeek Harness.')
+// 2026-10-23: the rule grew past the opening. The harness's Web-GUI development
+// guidance is what trips it now, and that guidance is meaningless to a chat
+// completion, so those lines go and brand mentions are generalised.
+const webGuiPrompt = [
+  'You are an AI agent.',
+  '',
+  'You are interacting with the user through the DeepSeek Harness Web GUI whose URL the runtime context names. ',
+  'The client-plugin HMR receiver is active, but changes reload only while `pnpm run dev:web` is running.',
+  'The apps/web Vite entry builds the shell but is not a standalone application.',
+  'Do not start a replacement server unless the user asks.',
+  '',
+  'Keep this line.'
+].join('\n')
+const trimmed = cn.sanitizeSystem(webGuiPrompt)
+assert.ok(!/pnpm run dev:web/.test(trimmed), 'the dev-server line is dropped')
+assert.ok(!/apps\/web/.test(trimmed), 'the shell line is dropped')
+assert.ok(!/Web GUI/.test(trimmed), 'the Web GUI opening is dropped')
+assert.ok(!/DeepSeek Harness/.test(trimmed), 'brand mentions are generalised')
+assert.ok(trimmed.includes('Keep this line.'), 'unrelated instructions survive')
+assert.ok(!/\n{3,}/.test(trimmed), 'no paragraph pile-up left behind')
 
 // One prompt shape for both deployments.
 assert.equal(intl.sanitizeSystem(BLOCKED), cn.sanitizeSystem(BLOCKED), 'the international route rewrites it the same way')
