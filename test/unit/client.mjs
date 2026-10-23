@@ -353,4 +353,21 @@ installFetch({ state: signedOutState, models: [], fail: true })
 const failedTree = await renderPanel()
 assert.ok(textsOf(failedTree).some((text) => text.includes('offline')), 'a failed load surfaces the error')
 
-console.log('client.mjs: OK — registration, dictionaries, and three full panel renders verified')
+// 4) Two models that share a display name keep a fixed order.
+//
+// `deepseek-v4.1-flash` and `deepseek-v4.1-flash-sg` are both named Deepseek-V4.1-Flash,
+// and one of them is switched off. With a name-only comparator their relative order
+// followed the catalog's own order, so the pair swapped rows on reload — which reads as
+// "the switch turned itself on, then off". The id is the tiebreaker, so the order is the
+// same whichever way the catalog arrives.
+{
+  const byName = (a, b) => String(a.name ?? a.id).localeCompare(String(b.name ?? b.id), 'zh-Hans-CN', { numeric: true })
+    || String(a.id).localeCompare(String(b.id))
+  const flash = { id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash' }
+  const sg = { id: 'deepseek-v4.1-flash-sg', name: 'Deepseek-V4.1-Flash' }
+  assert.deepEqual([flash, sg].sort(byName).map((m) => m.id), ['deepseek-v4.1-flash', 'deepseek-v4.1-flash-sg'])
+  assert.deepEqual([sg, flash].sort(byName).map((m) => m.id), ['deepseek-v4.1-flash', 'deepseek-v4.1-flash-sg'], 'the order does not depend on input order')
+  assert.ok(byName(flash, sg) < 0 && byName(sg, flash) > 0, 'and the comparator is antisymmetric')
+}
+
+console.log('client.mjs: OK — registration, dictionaries, three full panel renders, and the same-name ordering verified')

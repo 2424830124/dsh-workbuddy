@@ -942,7 +942,12 @@ window.__ModuleLoader__.load({
       const usableRows = rows.filter((model) => model.preset !== true)
       // Listed by display name (falling back to the id), the way the official
       // picker orders them, and carrying the busy level the deployment reports.
+      // The id breaks ties: `deepseek-v4.1-flash` and `deepseek-v4.1-flash-sg` share a
+      // display name, and without a second key their relative order followed whatever the
+      // catalog happened to return — the two rows swapped on every reload, which read as
+      // "the switch turned itself on and off".
       const byName = (a, b) => String(a.name ?? a.id).localeCompare(String(b.name ?? b.id), 'zh-Hans-CN', { numeric: true })
+        || String(a.id).localeCompare(String(b.id))
       // Both the level and whether this deployment even publishes one: the
       // international build has no `/v2/chat/busy`, so it shows nothing at all
       // there instead of a column of "未知".
