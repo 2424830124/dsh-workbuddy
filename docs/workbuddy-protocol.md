@@ -706,9 +706,13 @@ POST /v2/chat/completions {"model":"glm-4.6", …}
 | 那一段的每一句单独送 | 全都过 ✅ |
 | 中性提示词填充到 5.7k / 10k 字符 | 过 ✅（不是长度） |
 
-所以**不是一个词、也不是长度**，而是「提示词整体 + 那段开发指引」的组合命中。那段内容是 `pnpm run dev:web` / `apps/web` / HMR / "do not start a replacement server" —— **给改 harness 自身的人看的**，对一次聊天补全毫无用处，所以插件直接**整行删掉**，并把 `DeepSeek Harness` 统一改写成 `this harness`（顺序很重要：先删行再改名，否则模式匹配不到原文）。
+所以**不是一个词、也不是长度**，而是「提示词整体 + 那段开发指引」的组合命中。
 
-> 注意：这条规则**会继续扩大**。再遇到 11128 时，用 `node test/live/cn-prompt-fingerprint.mjs` 二分定位新命中的段落，再决定删还是改，别猜。
+**最终做法（2026-10-23 定稿）：只做品牌改名** —— 全文 `DeepSeek Harness` → `this harness`，开头那句、
+Web GUI 段落都**原样保留**。实测：这样做之后，完整 DSH 提示词打 CN **3/3 通过**（`test/live/cn-prompt-bisect.mjs`）。
+早先试过"删掉 Web GUI 段落"，虽然也能通过，但那是在改别人的提示词内容 —— 改名才是最小改动。
+
+> 注意：这条规则**会继续扩大**。再遇到 11128 时，用 `node test/live/cn-prompt-fingerprint.mjs` 二分定位新命中的段落，再决定怎么办，别猜。
 
 ### 7.2 其它渠道相关事实
 

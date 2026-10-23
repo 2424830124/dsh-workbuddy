@@ -30,35 +30,20 @@ const ctx = {
 const cn = new WorkBuddyAdapter(ctx, REGIONS.cn)
 const intl = new WorkBuddyAdapter(ctx, REGIONS.intl)
 
+// The only rewrite this route performs: the brand becomes a generic noun. Nothing
+// else in the prompt is touched.
 const sanitized = cn.sanitizeSystem(BLOCKED)
-assert.ok(!/^\s*you are an ai agent powered by deepseek harness/i.test(sanitized), 'the blocked opening must be gone')
-assert.ok(sanitized.startsWith('You are an AI agent.'), 'replaced with the neutral opening')
+assert.ok(!/DeepSeek Harness/.test(sanitized), 'brand mentions are generalised')
+assert.ok(sanitized.includes('powered by this harness'), 'rewritten in place, not removed')
 assert.ok(sanitized.includes('You are a coding agent powered by the hy3 model. Instructions follow.'), 'the rest survives verbatim')
 
-// Case-insensitive and punctuation-tolerant, as the gateway is.
-assert.equal(cn.sanitizeSystem('you are an ai agent powered by deepseek harness'), 'You are an AI agent.')
-assert.equal(cn.sanitizeSystem('  You are an AI agent powered by DeepSeek Harness.  rest'), 'You are an AI agent.  rest')
+// Case-sensitive on purpose: the gateway matches the brand as published.
+assert.equal(cn.sanitizeSystem('You are an AI agent powered by DeepSeek Harness.'), 'You are an AI agent powered by this harness.')
+assert.equal(cn.sanitizeSystem('deepseek harness'), 'deepseek harness', 'other casings are left alone')
+assert.equal(cn.sanitizeSystem('no brand here'), 'no brand here')
 
-// 2026-10-23: the rule grew past the opening. The harness's Web-GUI development
-// guidance is what trips it now, and that guidance is meaningless to a chat
-// completion, so those lines go and brand mentions are generalised.
-const webGuiPrompt = [
-  'You are an AI agent.',
-  '',
-  'You are interacting with the user through the DeepSeek Harness Web GUI whose URL the runtime context names. ',
-  'The client-plugin HMR receiver is active, but changes reload only while `pnpm run dev:web` is running.',
-  'The apps/web Vite entry builds the shell but is not a standalone application.',
-  'Do not start a replacement server unless the user asks.',
-  '',
-  'Keep this line.'
-].join('\n')
-const trimmed = cn.sanitizeSystem(webGuiPrompt)
-assert.ok(!/pnpm run dev:web/.test(trimmed), 'the dev-server line is dropped')
-assert.ok(!/apps\/web/.test(trimmed), 'the shell line is dropped')
-assert.ok(!/Web GUI/.test(trimmed), 'the Web GUI opening is dropped')
-assert.ok(!/DeepSeek Harness/.test(trimmed), 'brand mentions are generalised')
-assert.ok(trimmed.includes('Keep this line.'), 'unrelated instructions survive')
-assert.ok(!/\n{3,}/.test(trimmed), 'no paragraph pile-up left behind')
+// Every mention is rewritten, not just the first.
+assert.equal(cn.sanitizeSystem('A: DeepSeek Harness. B: DeepSeek Harness.'), 'A: this harness. B: this harness.')
 
 // One prompt shape for both deployments.
 assert.equal(intl.sanitizeSystem(BLOCKED), cn.sanitizeSystem(BLOCKED), 'the international route rewrites it the same way')
@@ -198,6 +183,88 @@ const collect = async (adapter) => {
   })) chunks.push(chunk)
   return chunks
 }
+
+// ---------------------------------------------------------------------------
+// Automatic continuation (the reference client's `streamRecovery`).
+//
+// A cut stream, or a stop that only produced reasoning, is continued once in-process
+// so the user sees one answer instead of a silent ending.
+// ---------------------------------------------------------------------------
+
+const runRounds = async (responses) => {
+  const adapter = new WorkBuddyAdapter({
+    logger: { info: () => {}, warn: () => {}, error: () => {} },
+    credentials: { resolve: async () => ({ value: 'header.payload.signature' }) },
+    get: () => undefined
+  }, REGIONS.cn)
+  adapter.catalog = []
+  adapter.catalogAt = Date.now()
+  let call = 0
+  const bodies = []
+  globalThis.fetch = async (url, init) => {
+    bodies.push(JSON.parse(init.body))
+    const response = responses[Math.min(call, responses.length - 1)]
+    call += 1
+    return streamOf(response)
+  }
+  const chunks = await collect(adapter)
+  return { chunks, calls: call, bodies }
+}
+
+// 1) Cut before [DONE]: one continuation, and the user sees the second answer.
+const cutThenAnswer = await runRounds([
+  'data: {"choices":[{"delta":{"content":"改好"}}]}\n\n',
+  'data: {"choices":[{"delta":{"content":"了，文件已写入。"}}]}\n\n'
+    + 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+    + 'data: [DONE]\n\n'
+])
+assert.equal(cutThenAnswer.calls, 2, 'a cut stream is continued exactly once')
+const recoveredText = cutThenAnswer.chunks
+  .filter((chunk) => chunk.type === 'block-end' && chunk.block?.type === 'text')
+  .map((chunk) => chunk.block.text)
+  .join('')
+assert.ok(recoveredText.includes('改好'), 'the first attempt text survives')
+assert.ok(recoveredText.includes('文件已写入'), 'and the continuation is appended')
+assert.equal(cutThenAnswer.chunks.filter((chunk) => chunk.type === 'finish').length, 1, 'only one finish reaches the harness')
+assert.equal(cutThenAnswer.chunks.at(-1).reason.kind, 'stop', 'the continuation decides the ending')
+assert.ok(
+  JSON.stringify(cutThenAnswer.bodies[1]).includes('incomplete draft'),
+  'the continuation carries the draft'
+)
+
+// 2) A stop holding only reasoning: continued with shifted block indices.
+const silentStop = await runRounds([
+  'data: {"choices":[{"delta":{"reasoning_content":"先看目录…"}}]}\n\n'
+    + 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+    + 'data: [DONE]\n\n',
+  'data: {"choices":[{"delta":{"content":"已完成。"}}]}\n\n'
+    + 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+    + 'data: [DONE]\n\n'
+])
+assert.equal(silentStop.calls, 2, 'a reasoning-only stop is continued')
+const indexes = silentStop.chunks.filter((chunk) => typeof chunk.index === 'number').map((chunk) => chunk.index)
+const reasoningEnd = silentStop.chunks.find((chunk) => chunk.type === 'block-end' && chunk.block?.type === 'reasoning')
+const textEnd = silentStop.chunks.find((chunk) => chunk.type === 'block-end' && chunk.block?.type === 'text')
+assert.equal(reasoningEnd.index, 0)
+assert.equal(textEnd.index, 1, 'the continuation appends a new block instead of reusing index 0')
+assert.ok(indexes.every((index) => Number.isInteger(index)))
+
+// 3) A normal stop with an answer is not continued.
+const plainStop = await runRounds([
+  'data: {"choices":[{"delta":{"content":"改好了。"}}]}\n\n'
+    + 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+    + 'data: [DONE]\n\n'
+])
+assert.equal(plainStop.calls, 1, 'a real answer ends the turn, no continuation')
+
+// 4) A refusal is never continued.
+const refusalStop = await runRounds([
+  'data: {"choices":[{"delta":{"content":"我无法"}}]}\n\n'
+    + 'data: {"choices":[{"delta":{},"finish_reason":"refusal"}]}\n\n'
+    + 'data: [DONE]\n\n'
+])
+assert.equal(refusalStop.calls, 1, 'a refusal is not retried')
+assert.equal(refusalStop.chunks.at(-1).reason.kind, 'error')
 
 const cut = new WorkBuddyAdapter({
   logger: { info: () => {}, warn: () => {}, error: () => {} },
