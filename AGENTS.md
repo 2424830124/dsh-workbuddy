@@ -130,7 +130,35 @@ test/live/          需要真实账号的在线探针与诊断脚本
 - 提交前跑 `npm test`。新增行为请补单测；面板相关的改动至少让 `test/unit/client.mjs` 的
   渲染断言覆盖到（它用一个小号 React **真的渲染**面板，缺 helper / 缺词典键会当场报错）。
 - 面板外观改动后跑 `node test/live/ui-preview.mjs` 并用截图对比（输出在 `%TEMP%`）。
-- 排查面板/选择器问题时先看这三行日志（都在宿主日志里）：
+
+### 15 个离线单测各管什么
+
+```sh
+npm test                          # 全部
+node test/unit/plugin.mjs         # provider 注册、目录、/workbuddy 命令、HTTP 路由
+node test/unit/api.mjs            # 面板接口：状态载荷、积分/签到、参数校验、信任栅栏、图标
+node test/unit/client.mjs         # 客户端：注册、词典回退、三种状态的完整渲染、同名排序
+node test/unit/region-order.mjs   # 显示顺序 ↔ 客户端占位顺序 ↔ 默认标签三者一致
+node test/unit/wire.mjs           # 工具结果保持 tool 角色、配对、旧格式、角色映射、reasoning 回放
+node test/unit/endings.mjs        # 结束分类整张表 + 优先级
+node test/unit/recovery.mjs       # 一轮上限、usage 累加、索引偏移、续写载荷、清空 tools
+node test/unit/catalog.mjs        # 双数据源并发抓取、合并、回退
+node test/unit/catalog-cache.mjs  # 追加语义、缺字段不覆盖、倍率不落盘、读取时重放准入
+node test/unit/official-list.mjs  # 名单导入、字段级富化（不含倍率）、清理
+node test/unit/model-prefs.mjs    # 判定默认值、手工覆盖、批量开关、分部署探测形态
+node test/unit/availability.mjs   # 探测分类、dead 有效期、按 id 合并、分部署台账
+node test/unit/auth.mjs           # 退出删凭据、陈旧续期/登录结果不写回
+node test/unit/logout.mjs         # 退出隐藏全部模型、登录恢复判定默认
+node test/unit/adapter.mjs        # 提示词改写、请求体组装、聊天路由顺序、排队错误映射
+```
+
+`client.mjs` 那一层值得单独说：它用一个小号 React（状态更新会重渲染、effect 在函数体之后执行）
+把面板**真的渲染出来**，断言输出里有账号、分组、模型名、促销与繁忙标签、倍率与「未知」。
+面板是一个大函数，少了某个 helper 或词典键在应用里就是一片空白，只有这一层能拦住。
+
+### 排查用的三行日志
+
+- 排查面板/选择器问题时先看这三行（都在宿主日志里）：
   - `已注册 provider …（实例 xxxx）` —— 这次加载到底是不是新代码；
   - `已通知模型拓扑变化（ctx.emit）` —— 开关等写入是否通知了 harness；
   - `<region>: 选择器读取目录 → N/M 个可选` —— 选择器**每次**读目录都会打，
@@ -169,6 +197,99 @@ node test/live/last-finishes.mjs "" [步数] dsh-model-picker          # 每步 
 `max_tokens`、`refusal`（被拒/被过滤）、`error`。**先看这个再猜原因**。
 
 完整清单在协议文档附录。
+
+## 实现细节（从 README 搬来的，用户不需要知道）
+
+### 模型目录的数据源
+
+两个端点**并行**取，只用实时数据，没有本地模型表：
+
+| 来源 | 角色 | 说明 |
+| --- | --- | --- |
+| `GET /console/enterprises/personal/models` | 定列表 | 账号维度，决定"这台账号有哪些模型" |
+| `GET /v3/config` | 补字段 | 部署维度，补上 scoped 没写的等级集合、描述、倍率等 |
+
+- scoped 成功 → 用它定列表，用 config 逐字段补空（同 id）；config 独有、scoped 没有的 id **不并入列表**（那些多是已下线条目）。
+- scoped 失败 → 直接用 config（海外版当前的常态）。
+- 两个都失败 → 用本地缓存；连缓存都没有才是空列表。
+- 内存缓存 10 分钟；登录、退出、`/models?refresh=1` 会立即重取。
+
+### 准入策略（哪些模型进列表）
+
+按顺序判定，一条不满足即剔除：
+
+1. **裸路由别名不进列表**：`auto`、`default`。能调通但官方选择器不展示；已被钉住的长会话仍可调用。
+2. **路由预设两版都剔除**：`default-model`、`fast-model`、`balanced-model`、`primary-model`、`deep-model` —— 按请求临时挑后端、倍率浮动。
+3. **白名单优先**：`agents[cli].models` 无条件保留。**两版白名单不同**，各读各自的 payload：国内 19/20 条，国际 28 条。
+4. **白名单外必须有实时倍率**：`credits` 有值才留。倍率是"这个模型确实在售"的唯一凭据。
+5. 非对话后端（`completion-*` / `codewise-*` / `nes-*` / `hunyuan-image*` / `kling-video*` / `minimax-video*`、`maxOutputTokens ≤ 256`、`tags` 含 `text-to-image`）一律剔除。
+
+实测（2026-10-21）：国内 34 → **30**，国际 28 → **24**。
+
+### 探测请求的形态（两个部署不同，不要互相套用）
+
+| | 大陆版 | 海外版 |
+| --- | --- | --- |
+| 网关校验顺序 | **先解析模型，后校验参数** | **先校验请求形状**（空/首条非 system → `11128`） |
+| 探测请求体 | `{"model":M,"messages":[],"stream":true}` | `{"model":M,"messages":[{system:""}],"stream":true,"max_tokens":1}` |
+| 判定 | 活 → `11133`/`11151`；已下架 → `11102` | 可用 → `11151`/`11133`/`200`；无权限 → `11158`；已下架 → `11102` |
+| 代价（各 8 次实测） | 积分 **0 变化** | 积分 **0 变化** |
+
+海外版的关键是**空的 system 内容**：满足"首条必须是 system"的形状要求，又让大多数模型在生成前
+就回 `11151 a message has empty content`（校验层拒绝，不派发给模型）。
+
+`max_tokens: 0` **不是零消耗手段** —— 实测被当成"没设置"，照常生成 12 个 token。
+
+### 判定与台账
+
+- 判定表（`classifyProbe`）：`ok`(200·11133·11151·其它 4xx) / `dead`(11102) / **`denied`(11158)** /
+  `busy`(429·6020) / `blocked`(11128) / `auth`(401·403) / `down`(5xx) / `error`。
+- 面板呈现：**不可用**（红）= 仅 `11102`；**无权限**（橙）= `11158` + `11128`；
+  **凭据失效**（橙）= `401/403`；其余进**未知**（灰），原始报文留在悬停里。
+- 分组只看结论：`不可用模型` = dead/denied/blocked，其余（含未知、排队）留在可用组。
+- 台账 `availability-<region>.json` 按 id 记 `{state, detail, at}`，新结果覆盖旧的、其它条目保留；
+  不可用判定**有效期 12 小时**。同文件记 `lastSweepAt` 用于节流。
+- **自学习**：真实对话里回 `11102`/`11158` 直接写台账并失效目录缓存，不额外花请求。
+- 触发：打开面板自动一次（国内 10 分钟节流、国际 24 小时）；按钮=手动立即；`/workbuddy check`=全量。
+
+### 目录缓存语义
+
+`catalog-<region>.json`：
+
+- **追加**：按 id 并入，新 id 加入、老 id 刷新，**这次没提到的保留**（上游答得少不会缩短列表）。
+- **缺字段不覆盖**：新数据没带的字段保留旧值；`efforts` 与 `input` 取并集。
+- **倍率不进缓存**：`credits` 是实时值，缓存不存、读时丢弃。
+- **准入策略在读取时同样生效**（缓存是追加的，规则会变）。
+- 写入原子（临时文件 + rename），旧快照留 `catalog-<region>.prev.json`。
+
+### 上游行为与错误映射
+
+退避重试**全部由 harness 负责**（`dsh-llm-retry`，默认 5 次、500ms 起指数退避 + 抖动、上限 10s）。
+适配器只做两件**即时**补救，都不是退避重试：
+
+1. `Illegal API invocation from an unapproved channel` → 换会话标识重发一次，仍失败则切备用聊天路由；
+2. `401/403` → 先续期令牌再发一次。
+
+适配器**不转发上游的 `retry_after`**：节拍只由一套策略掌握。
+
+- **模型排队**：`429` + `6020` + i18n key `queue.waiting.title` + `data.queue_position`
+  → 「模型排队中（队列第 N 位），将自动重试」，`RATE_LIMIT`。
+- **用量频率超限**：`429` + `usage exceeds frequency limit…reset at <时间>` → `RATE_LIMIT`，
+  文案里带重置时间与"期间可换其它模型"。
+- **未获批渠道**：见不变量 11 与提示词改写。
+- **模型不可用**：`11102` → `INVALID_REQUEST`，不重试。
+- **401/403** → 先续期再重试一次；**5xx** → `SERVER`。
+
+### 系统提示词改写
+
+国内网关会把**以这句开头**的 system 消息判成"未获批渠道"（`code 11128`）：
+
+```
+You are an AI agent powered by DeepSeek Harness.
+```
+
+规则是**行首锚定、大小写不敏感、句末句点可选**的品牌指纹。适配器只把 `DeepSeek Harness`
+改成 `this harness`，其余原样保留；海外版走同一条路径，避免两套形态。
 
 ## 代码与写作约定
 
