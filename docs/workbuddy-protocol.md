@@ -175,8 +175,8 @@ POST <chatEndpoint>/v2/chat/completions
 | `max_tokens` | 否 | 实测 `128000` 可用 ✅；未知/别名模型按目录 `maxOutputTokens` |
 | `tools` | 否 | OpenAI function 形态，70 个工具 / 60 KB 实测通过 ✅ |
 | `prompt_cache_key` | 否 | 服务端前缀缓存键；缺失时缓存命中恒为 0 📖 |
-| `thinking` | 否 | `{"type":"enabled"}`，deepseek 系使用 📖✅ |
-| `reasoning_effort` | 否 | `low` / `medium` / `high` / `xhigh` / `max`，取值须在该模型支持列表内 ✅ 网关会校验（见下） |
+| `thinking` | 否 | **本插件不再发送**（2026-10-23 实测：带不带它都不影响 ds 是否思考，见 §12.1） |
+| `reasoning_effort` | 否 | `low` / `medium` / `high` / `xhigh` / `max`，取值须在该模型支持列表内 ✅ 网关会校验（见下）；**这是唯一的思考控制**，按目录声明统一取值（调用方选择 → `defaultEffort` → `high` → 首档） |
 | `temperature` / `stop` | 否 | 直通 ✅ |
 
 **`reasoning_effort` 是真实生效的参数**（2026-10-22 实测，海外版 `deepseek-v4.1-flash`，免费模型，
@@ -871,8 +871,8 @@ provider 与全部 HTTP 路由都没注册，设置面板只剩一个 `HTTP 404`
 | `stream_options.include_usage` | 发（0.1.8 起） | 发 | 已对齐 ✓ |
 | `tool_choice` / `parallel_tool_calls` | 不发 | 发（配置值） | 服务端默认 `auto` / `true`，等价 ✓ |
 | `temperature` / `top_p` / `frequency_penalty` / `presence_penalty` | **不发**（仅调用方给 temperature 时发） | **总是发**（模型配置值，缺省 `DEFAULT_TEMPERATURE`） | **真实差异**，但实测对"提前收尾"无影响（默认/0.2/0.5/0.7/0.3+top_p0.9 各 8 次：2/8、2/8、3/8、3/8，同一水平）→ 暂不跟随，避免擅自改变输出风格 |
-| `reasoning_effort` | 发（目录档位；无档位不发） | 发（同左） | 一致 ✓ |
-| `thinking` | deepseek 系总发 `{type:'enabled'}` | **开启时不发**；关闭时发 `{type:'disabled'}` | 小差异：我们多带一个 `enabled`，实测被接受且行为正确 ✓（不发更贴近官方，但无收益，暂留） |
+| `reasoning_effort` | 发（目录档位，**所有模型同一套规则**：调用方选择 → `defaultEffort` → `high` → 首档；无档位不发） | 发（同左） | 一致 ✓ |
+| `thinking` | **不发**（2026-10-23 起） | **开启时不发**；关闭时发 `{type:'disabled'}` | 已对齐 ✓。实测（两个部署各 2–3 次）：带不带 `{type:'enabled'}`，`high` 档都是 0 思考字符；`max` 档不带时思考更多（INTL 384 vs 306、CN 476 vs 418）→ 该字段对"思不思考"没有作用 |
 | `prompt_cache_key` | 发（会话级） | **不发** | 反向差异；实测对本问题无影响（去掉后 1/8 vs 2/8），保留以提高前缀缓存命中 ✓ |
 | `stop` | 仅调用方给 | 不发 | 等价 ✓ |
 | `store` / `prompt_cache_retention` | 不发 | 发（配置值，通常未设置） | 等价 ✓ |

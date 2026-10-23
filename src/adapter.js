@@ -660,23 +660,30 @@ export class WorkBuddyAdapter {
     const maxTokens = positiveInt(options.maxTokens) ?? entry?.maxTokens
     if (maxTokens !== undefined) body.max_tokens = maxTokens
 
-    // Thinking is pinned on: there is no switch anywhere in the plugin. Upstream
-    // publishes `reasoning.canDisableThinking` without naming a request parameter
-    // that would act on it (protocol §4.3.1), so the effort level is the only
-    // reasoning control, and the explicit `thinking` field is sent where the
-    // official client is known to send it (deepseek family, §4.5) — the other
-    // families ignore it, whatever the value.
-    const isDeepSeek = model.startsWith('deepseek-')
-    if (isDeepSeek) body.thinking = { type: 'enabled' }
-    // `efforts` is optional: many catalog entries declare no level set, and
-    // reading `Object.keys` off that `undefined` used to throw before the
-    // request was even built.
+    // Thinking is pinned on for every model, with no per-family branch: the effort
+    // level is the only reasoning control, and it is picked from what the catalog
+    // declares rather than from the model's name —
+    //   1. the level the caller chose, when the model declares it;
+    //   2. otherwise the model's own `defaultEffort` from the catalog;
+    //   3. otherwise `high` when declared, else the first declared level;
+    //   4. no levels declared → send nothing and let the deployment decide.
+    //
+    // The `thinking` field is deliberately **not** sent for anyone. Measured
+    // 2026-10-23 on both deployments (`test/live/thinking-field-probe.mjs`): with
+    // `reasoning_effort` present, dropping `thinking:{type:'enabled'}` changes
+    // nothing at `high` (0 reasoning chars either way) and yields slightly more
+    // reasoning at `max` (384 vs 306 on INTL, 476 vs 418 on CN). The official client
+    // only sends that field when it turns thinking *off*, so the enabled form was
+    // never part of its contract.
+    //
+    // `efforts` is optional: many catalog entries declare no level set, and reading
+    // `Object.keys` off that `undefined` used to throw before the request was built.
     const levels = entry?.efforts === undefined ? [] : Object.keys(entry.efforts)
-    if (options.reasoningEffort !== undefined && levels.includes(options.reasoningEffort)) {
-      body.reasoning_effort = options.reasoningEffort
-    } else if (isDeepSeek && levels.length > 0) {
-      body.reasoning_effort = levels.includes('high') ? 'high' : levels[0]
-    }
+    const preferred = levels.includes(options.reasoningEffort)
+      ? options.reasoningEffort
+      : (levels.includes(entry?.defaultEffort) ? entry.defaultEffort : undefined)
+    const effort = preferred ?? (levels.includes('high') ? 'high' : levels[0])
+    if (effort !== undefined) body.reasoning_effort = effort
     return body
   }
 

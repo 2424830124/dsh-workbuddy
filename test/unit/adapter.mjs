@@ -90,19 +90,32 @@ const withLevels = (id, levels, isDeepSeek = false) => ({
 const declared = withLevels('deepseek-v4.1-flash', ['low', 'high', 'max'], true)
 const chosen = cn.buildBody({ model: declared.id, messages: [], reasoningEffort: 'max' }, declared.id, declared, undefined)
 assert.equal(chosen.reasoning_effort, 'max', 'the selected level reaches the request')
-assert.deepEqual(chosen.thinking, { type: 'enabled' }, 'the deepseek family is pinned to thinking on')
+// The effort level is the whole reasoning control. Measured on both deployments:
+// with `reasoning_effort` present, dropping `thinking:{type:'enabled'}` changes
+// nothing at `high` and yields slightly more reasoning at `max`; the official
+// client only sends the field when it turns thinking off.
+assert.equal(chosen.thinking, undefined, 'no thinking flag is invented — the level carries the intent')
 
 const undeclared = cn.buildBody({ model: declared.id, messages: [], reasoningEffort: 'xhigh' }, declared.id, declared, undefined)
 assert.equal(undeclared.reasoning_effort, 'high', 'a level the model does not declare falls back to high, never to the raw value')
 
 const silentDeepSeek = cn.buildBody({ model: declared.id, messages: [] }, declared.id, declared, undefined)
 assert.equal(silentDeepSeek.reasoning_effort, 'high', 'a deepseek model with no selection still asks for the default level')
-assert.deepEqual(silentDeepSeek.thinking, { type: 'enabled' })
+assert.equal(silentDeepSeek.thinking, undefined)
 
 const otherFamily = withLevels('glm-5.2', ['low', 'medium', 'high'])
 const otherChosen = cn.buildBody({ model: otherFamily.id, messages: [], reasoningEffort: 'medium' }, otherFamily.id, otherFamily, undefined)
 assert.equal(otherChosen.reasoning_effort, 'medium', 'other families send the selected level too')
-assert.equal(otherChosen.thinking, undefined, 'no invented thinking field outside the verified family')
+assert.equal(otherChosen.thinking, undefined, 'no thinking field is invented for any family')
+
+// The same rule for every family, catalog-driven: with no selection the model's own
+// declared default goes out, not a hard-coded level and not silence.
+const otherSilent = cn.buildBody({ model: otherFamily.id, messages: [] }, otherFamily.id, otherFamily, undefined)
+assert.equal(otherSilent.reasoning_effort, 'medium', 'a model with a declared default sends that default')
+
+// A level the caller picked that the model does not declare falls back the same way.
+const otherMismatch = cn.buildBody({ model: otherFamily.id, messages: [], reasoningEffort: 'max' }, otherFamily.id, otherFamily, undefined)
+assert.equal(otherMismatch.reasoning_effort, 'medium', 'an undeclared level falls back to the catalog default')
 
 const noLevels = cn.buildBody({ model: 'hy3', messages: [], reasoningEffort: 'high' }, 'hy3', { id: 'hy3', name: 'Hy3', input: ['text'] }, undefined)
 assert.equal(noLevels.reasoning_effort, undefined, 'a model with no declared levels gets no reasoning field')
