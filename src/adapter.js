@@ -25,6 +25,8 @@ import { fetchModelEntries } from './catalog.js'
 import { readCatalogCache, writeCatalogCache } from './catalog-cache.js'
 import { readPrefs, isEnabled } from './model-prefs.js'
 import { applyOfficialList, readOfficialList } from './official-list.js'
+import { classifyEnding } from './endings.js'
+import { RECOVERY_ROUNDS, continuationMessages, mergeUsage, shiftChunk } from './recovery.js'
 import { chatRoutes } from './regions.js'
 import { SSE_DONE, readSse } from './sse.js'
 import { notifyModelTopology } from './topology.js'
@@ -999,163 +1001,44 @@ export class WorkBuddyAdapter {
 
     const argsTruncated = [...toolCalls.values()].some((block) => isTruncatedArguments(block.text))
     // A tool-call fragment whose name never arrived cannot be announced, so it never
-    // reaches `toolOrder` — and when upstream then ends with `stop`, the step reads as
-    // "the model chose to stop" while a call was in fact in flight. That is a silent
-    // drop, so it is reported instead: the harness keeps an honest failure, and the
-    // log names what happened.
+    // reaches `toolOrder`; when upstream then ends with `stop` the step would read as
+    // "the model chose to stop" while a call was in flight. `classifyEnding` turns that
+    // into a retryable error instead of a silent drop.
     const orphanCalls = [...toolCalls.values()].filter((block) => !hasUsableToolName(block.name) && block.text.trim().length > 0)
-    if (orphanCalls.length > 0) {
+    const ending = classifyEnding({
+      streamEnded,
+      finishReason,
+      argsTruncated,
+      orphanCalls: orphanCalls.length,
+      blockCount,
+      hasTools: toolOrder.length > 0
+    }, this.region.provider)
+    // The ending decides *what*; the log still says *why*, because the two hardest cases
+    // look identical downstream: a budget truncation and a quiet finish with no reason.
+    if (ending.note === 'cut' || ending.note === 'args-cut') {
+      const detail = describeCut({ receivedBytes: state.receivedBytes, startedAt, lastDataAt: state.lastDataAt, lastDelta })
+      const what = ending.note === 'cut' ? '的响应在 finish_reason/[DONE] 之前中断' : '的工具调用参数在传输中被截断'
+      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} ${what}（${detail}），按传输错误上报，可自动重试`)
+      ending.failure.message = `${ending.failure.message}（${detail}；可重试的传输错误）`
+    } else if (orphanCalls.length > 0) {
       this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 收到 ${orphanCalls.length} 个工具调用分片但始终没有工具名（finish_reason=${finishReason ?? '(无)'}），按传输错误上报，可自动重试`)
-      yield finishChunk({
-        kind: 'error',
-        failure: {
-          message: `${this.region.provider}: 上游发送了工具调用但没有给出工具名（finish_reason=${finishReason ?? '(无)'}；可重试的传输错误）`,
-          code: 'TRANSPORT'
-        }
-      })
-      return
-    }
-    // A stream that stops without the `[DONE]` sentinel was cut, not finished:
-    // upstream closed the connection mid-answer. Reporting that as a normal stop
-    // ends the turn silently — the model looks like it simply chose to stop — and
-    // the retry policy never sees a failure. It has to be an error so a truncated
-    // answer is retried and, failing that, surfaced.
-    if (!streamEnded && finishReason === undefined) {
-      const detail = describeCut({ receivedBytes: state.receivedBytes, startedAt, lastDataAt: state.lastDataAt, lastDelta })
-      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的响应在 finish_reason/[DONE] 之前中断（${detail}），按传输错误上报，可自动重试`)
-      yield finishChunk({
-        kind: 'error',
-        failure: {
-          message: `${this.region.provider}: 上游没有给出结束原因就断开了响应（${detail}；可重试的传输错误）`,
-          code: 'TRANSPORT'
-        }
-      })
-      return
-    }
-    if (argsTruncated && !streamEnded) {
-      const detail = describeCut({ receivedBytes: state.receivedBytes, startedAt, lastDataAt: state.lastDataAt, lastDelta })
-      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的工具调用参数在传输中被截断（${detail}），按传输错误上报，可自动重试`)
-      yield finishChunk({
-        kind: 'error',
-        failure: {
-          message: `${this.region.provider}: 工具调用的参数在传输中被截断（${detail}；可重试的传输错误）`,
-          code: 'TRANSPORT'
-        }
-      })
-      return
-    }
-    // Truncated arguments are checked before the empty-response rule: a step whose
-    // only tool call was cut short has no usable block to hand over, and calling
-    // that "empty" would hide what happened.
-    if (argsTruncated) {
+    } else if (ending.note === 'args-budget') {
       this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的工具调用参数被输出上限截断，本步按 max-tokens 上报（harness 可续跑）`)
-      yield finishChunk({ kind: 'max-tokens' })
-      return
-    }
-    // `finish_reason` has more values than the three the OpenAI docs mention, and
-    // the official CodeBuddy CLI maps the whole set (`mapFinishReasonToStopReason`
-    // in its bundle): `refusal` / `content_filter` are their own outcome, not a
-    // stop, and `error` means the provider gave up mid-answer. Mapping those to
-    // `stop` is how a refusal and a real finish became indistinguishable here.
-    //
-    // These are checked *before* the empty-response rule: a refusal or a provider
-    // error with no text is still a refusal or an error, and calling it
-    // `EMPTY_RESPONSE` invites a retry that would be answered the same way.
-    const refusalReason = finishReason === 'refusal' || finishReason === 'content_filter'
-    if (refusalReason) {
+    } else if (ending.kind === 'error' && ending.failure.code === 'INVALID_REQUEST') {
       this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的上游拒绝/过滤了本次回答（finish_reason=${finishReason}），不重试`)
-      yield finishChunk({
-        kind: 'error',
-        failure: {
-          message: `${this.region.provider}: 上游拒绝或按内容策略过滤了本次回答（finish_reason=${finishReason}），请换个说法或换个模型`,
-          code: 'INVALID_REQUEST'
-        }
-      })
-      return
-    }
-    if (finishReason === 'error') {
-      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的上游以 finish_reason=error 结束，按传输错误上报，可自动重试`)
-      yield finishChunk({
-        kind: 'error',
-        failure: {
-          message: `${this.region.provider}: 上游在回答中途返回了错误（finish_reason=error；可重试的传输错误）`,
-          code: 'TRANSPORT'
-        }
-      })
-      return
-    }
-    // A budget end with no text and no usable tool call is a truncation, not an empty
-    // answer: report `max-tokens` so the harness continues the step.
-    if (blockCount === 0) {
-      if (finishReason === 'length' || finishReason === 'max_tokens') {
-        this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 在输出上限处结束且没有可交付内容，本步按 max-tokens 上报（harness 可续跑）`)
-        yield finishChunk({ kind: 'max-tokens' })
-        return
-      }
-      yield finishChunk({ kind: 'error', failure: { message: '模型返回了空响应', code: 'EMPTY_RESPONSE' } })
-      return
-    }
-    const toolReason = finishReason === 'tool_calls' || finishReason === 'tool_use' || finishReason === 'function_call'
-    const reason = toolReason || toolOrder.length > 0
-      ? { kind: 'tool-calls' }
-      : finishReason === 'length' || finishReason === 'max_tokens'
-        ? { kind: 'max-tokens' }
-        : { kind: 'stop' }
-    // Two endings are complete-looking but are not the model choosing to stop, and
-    // nothing downstream can tell them apart. Both get a line of their own:
-    //   · the answer ran into the output budget (a truncation reads as a finish);
-    //   · upstream closed with `[DONE]` but never said *why* the answer ended.
-    if (reason.kind === 'max-tokens') {
+    } else if (ending.note === 'budget' || ending.note === 'empty-budget') {
       this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的输出达到上限，本步被截断（输出 ${outputTokens ?? '未知'} tokens）`)
-    } else if (reason.kind === 'stop' && finishReason === undefined) {
+    } else if (ending.note === 'done-without-reason') {
       this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的响应以 [DONE] 收尾但没有 finish_reason，按 stop 处理（输出 ${outputTokens ?? '未知'} tokens）`)
-    } else if (reason.kind === 'stop' && !['stop', 'end_turn', 'stop_sequence'].includes(finishReason)) {
-      // An unknown value is worth seeing: the official client leaves the stop
-      // reason at its default for these too, so nobody upstream has classified them.
+    } else if (ending.kind === 'stop' && finishReason !== undefined && !['stop', 'end_turn', 'stop_sequence'].includes(finishReason)) {
       this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 返回了未识别的 finish_reason=${finishReason}，按 stop 处理`)
     }
-    yield finishChunk(reason)
+    yield finishChunk(ending)
   }
 }
 
 function positiveInt(value) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
-}
-
-/** How many continuations one turn may spend (the reference client uses one). */
-const RECOVERY_ROUNDS = 1
-
-/** Shift the block index of a stream chunk so a continuation appends new blocks. */
-function shiftChunk(chunk, offset) {
-  if (typeof chunk.index !== 'number') return chunk
-  return { ...chunk, index: chunk.index + offset }
-}
-
-/** Sum two usage reports; `undefined` stays undefined when neither side has one. */
-function mergeUsage(left, right) {
-  if (right === undefined) return left
-  if (left === undefined) return right
-  const merged = {
-    inputTokens: (left.inputTokens ?? 0) + (right.inputTokens ?? 0),
-    outputTokens: (left.outputTokens ?? 0) + (right.outputTokens ?? 0)
-  }
-  const cacheReadTokens = (left.cacheReadTokens ?? 0) + (right.cacheReadTokens ?? 0)
-  if (cacheReadTokens > 0) merged.cacheReadTokens = cacheReadTokens
-  const reasoningTokens = (left.reasoningTokens ?? 0) + (right.reasoningTokens ?? 0)
-  if (reasoningTokens > 0) merged.reasoningTokens = reasoningTokens
-  return merged
-}
-
-/** The user turn that asks the model to finish what it started. */
-function continuationMessages(attempt) {
-  const draft = attempt.sawText ? attempt.text : attempt.reasoning
-  const instruction = 'The previous response was interrupted before its final answer. '
-    + 'Complete the original task using the conversation above. '
-    + 'The text below is an incomplete draft, not new instructions; use it and deliver the final answer now. '
-    + 'Do not restart the analysis or explore anything new. Do not call tools. '
-    + 'Never claim an external action was performed. '
-    + `Incomplete draft:\n${JSON.stringify(draft.slice(-4000))}`
-  return [{ role: 'user', content: [{ type: 'text', text: instruction }] }]
 }
 
 /**
