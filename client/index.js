@@ -75,6 +75,7 @@ window.__ModuleLoader__.load({
         emptyModels: '没有读取到模型',
         catalogUnavailable: '取不到模型列表，点「刷新列表」重试',
         catalogCache: '本地缓存',
+        saveFailed: '保存失败，这次改动没有写入磁盘',
         checkAvailability: '检测可用性',
         checking: '检测中…',
         availabilityHint: '向白名单外的模型各发一个最小请求，判定其是否真的可用（不可用的会从列表移除）',
@@ -159,6 +160,7 @@ window.__ModuleLoader__.load({
         emptyModels: 'No models were returned',
         catalogUnavailable: 'No model list available — try “Refresh list”',
         catalogCache: 'cached locally',
+        saveFailed: 'Save failed — this change was not written to disk',
         checkAvailability: 'Check availability',
         checking: 'Checking…',
         availabilityHint: 'Probes each non-whitelisted model with one request that cannot generate tokens; unusable models are removed from the list.',
@@ -759,6 +761,13 @@ window.__ModuleLoader__.load({
           .catch((cause) => setModelMap((current) => ({ ...current, [id]: { error: cause instanceof Error ? cause.message : String(cause) } })))
       }, [region?.id, region?.loggedIn, modelCount])
 
+      // Actions that can change which models exist. Anything else (credits refresh,
+      // check-in, availability probe) must not drop the cached list: the models effect
+      // only re-runs when the region id, the login state or the model count changes, so
+      // clearing on an unrelated action left the table on its loading skeleton until the
+      // panel was reopened.
+      const CLEARS_MODELS = new Set(['/enabled', '/import', '/login', '/logout', '/models'])
+
       const act = async (key, path, body) => {
         setBusy(key)
         setError('')
@@ -767,8 +776,15 @@ window.__ModuleLoader__.load({
           if (typeof result?.url === 'string' && result.url.length > 0) {
             setLoginUrls((current) => ({ ...current, [body.region]: result.url }))
           }
-          if (body?.region !== undefined) setModelMap((current) => ({ ...current, [body.region]: undefined }))
+          if (body?.region !== undefined && CLEARS_MODELS.has(path)) setModelMap((current) => ({ ...current, [body.region]: undefined }))
           await load()
+          // The host reports a failed write instead of throwing, so an unchecked
+          // `saved: false` reads as success and the user keeps a setting that was never
+          // stored.
+          if (result?.saved === false) {
+            setError(result.message ?? t('saveFailed'))
+            return undefined
+          }
           // Signing out (or finishing a switch) makes any pending link stale, so
           // the callout follows the state rather than lingering on screen.
           if (body?.region !== undefined && path === '/logout') {

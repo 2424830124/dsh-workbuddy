@@ -394,7 +394,7 @@ data: [DONE]
 | INTL scoped → `500`（openresty/APISIX，HTML 错误页） | 2026-10-21 起持续；`/v3/config` 正常 ✅ |
 | `glm-5.1` 图片能力两个端点矛盾 | scoped 报 `false`、`/v3/config` 报 `true`，实测能看图（📖 参考实现据此写了覆盖白名单） |
 | 目录包含渠道不服务的模型 | 见 `11102`（§6）✅ |
-| 长上下文下"说话说一半就收尾"（`finish_reason: stop`，无工具调用） | 上游/模型行为，**不是插件问题**。对外跟踪入口：[issue #1](https://github.com/2424830124/dsh-workbuddy/issues/1)（含两次真实截断的 `responseId`/`outputTokens` 与已排除项）。实测：同一提示、同一套工具、只改前面的对话长度 —— 0k 2/2 正常、30k 1/2（一次 181 字后 `stop`）、89k 1/2；每次 finish 诊断块都标 `workbuddy-intl/deepseek-v4.1-flash`。判据：流里**没有任何 tool-call 分片**、`finish_reason` 就是 `stop`（若丢帧会是 `tool_calls` 且能看到分片）。已排除：采样（五档 16/16 与 2–3/8 两个实验都无差别）、工具 schema/数量（70 个 / 单个 / 简化 schema 9/9 正常）、`prompt_cache_key` 与 `stream_options`（去掉后 1/8 vs 2/8）、提示词校验（海外版无 11128 之外的拦截，请求体按原样转发）。复现：`node test/live/long-context-probe.mjs 2`、`node test/live/repro-probe.mjs 3 deepseek-v4.1-flash 280000`；取证：`node test/live/session-tail-live.mjs <会话前缀> 8 dsh-model-picker`（读 `response.stopReason` 原话）。缓解只有换模型/压缩上下文/回一句"继续" —— 合法的 `stop` 不能当错误重试。 |
+| 长任务里"说话说一半就收尾"（`finish_reason: stop`，无工具调用） | **已定位：本插件的 bug，不是上游**（2026-10-23，[issue #1](https://github.com/2424830124/dsh-workbuddy/issues/1) 已关闭）。Harness 用**独立消息**表示工具结果（`{ role: 'tool', source: { kind: 'tool', callId } }`），而当时的转换只认嵌套的 `tool-result` 块 —— 于是工具结果被降级成 `user` 消息、配对判定失败、assistant 的工具调用被丢弃。模型拿到一份错乱的对话历史，就会写一句"我需要先读取…"然后收尾，而上游给的 `finish_reason` 是合法的 `stop`。修复见 `0.1.16`（两种形状都读、配对都认、`developer` → `system`），修复后同账号同模型的长任务不再句中收尾。教训：**"上游给的 reason 是对的"不等于"上游的行为是原因"** —— 先核对我们自己发出去的 transcript。 |
 
 ### 4.7 模型选择器里每一项元数据的来源
 

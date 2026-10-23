@@ -93,7 +93,15 @@ test/live/          需要真实账号的在线探针与诊断脚本
 12. **请求体与官方的唯一实质差异是采样参数**：官方总带 `temperature`/`top_p`/两个 penalty，
     我们只在调用方显式传 `temperature` 时才发。实测（默认/0.2/0.5/0.7/0.3+top_p0.9 各 8 次）
     对"提前收尾"没有影响，所以不跟随；真要改，先拿数据说话（协议文档 §12.1）。
-13. **一轮里最多自动续写一次**（`stream()` 包着 `streamRound()`，参考客户端的
+13. **工具结果必须保持 `tool` 角色**。Harness 把一次工具结果作为**独立消息**送来：
+    `{ role: 'tool', source: { kind: 'tool', callId }, content: [...] }`（老的 transcript 还有
+    嵌在 content 里的 `tool-result` 块，两种都要认）。把它降级成 `user` 消息，模型就不知道
+    结果回答的是哪个 `tool_call`，配对判定还会顺手丢掉那些调用 —— 症状是模型在长任务里
+    写一句"我需要先读取…"就收尾，而 `finish_reason` 是合法的 `stop`
+    （2026-10-23 的 [issue #1](https://github.com/2424830124/dsh-workbuddy/issues/1) 就是它，
+    修复见 `0.1.16`）。`developer` 消息按 `system` 发送。
+    排查时先核对我们**发出去**的 transcript，再怀疑上游。
+14. **一轮里最多自动续写一次**（`stream()` 包着 `streamRound()`，参考客户端的
     `streamRecovery`）。只有两种结束值得续写：**在 `[DONE]`/`finish_reason` 之前断流**，
     以及 **`stop` 但只有思考、没有正文**（用户那边等于空回复）。`max-tokens` **不在这里续**——
     harness 自己会续跑该步骤（不变量 9）。续写是一轮新的请求：把已产出的正文/思考当作

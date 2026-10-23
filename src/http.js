@@ -43,9 +43,16 @@ export function responseData(json) {
   return typeof data === 'object' && data !== null ? data : undefined
 }
 
+/**
+ * The envelope's business code, or `undefined` when there is no envelope at all.
+ *
+ * Returning 0 for an unparseable body made a timed-out or truncated 200 read as
+ * success — the claim path then recorded a check-in that never happened. Callers that
+ * act on the result compare against 0 explicitly, so `undefined` means "no answer".
+ */
 export function responseCode(json) {
-  if (typeof json !== 'object' || json === null) return 0
-  return typeof json.code === 'number' ? json.code : 0
+  if (typeof json !== 'object' || json === null) return undefined
+  return typeof json.code === 'number' ? json.code : undefined
 }
 
 export function responseMessage(json) {
