@@ -683,8 +683,13 @@ export class WorkBuddyAdapter {
     let messages = options.messages
     let offset = 0
     let totalUsage
+    // The continuation round carries no tool list. Telling the model "do not call tools"
+    // only discourages it; leaving `tools` in the body still lets it answer with a call we
+    // cannot honour (that round is a repair, not a new step), and a delivered call would
+    // restart the very work being repaired. Removing the field is the actual constraint.
+    let tools = options.tools
     for (let round = 0; round <= RECOVERY_ROUNDS; round += 1) {
-      const attempt = yield* this.streamRound({ ...options, messages }, offset)
+      const attempt = yield* this.streamRound({ ...options, messages, tools }, offset)
       totalUsage = mergeUsage(totalUsage, attempt.usage)
       const recover = round < RECOVERY_ROUNDS && this.recoverable(attempt)
       if (!recover) {
@@ -699,6 +704,7 @@ export class WorkBuddyAdapter {
       // above 1 this would otherwise drop the previous continuation and repeat the same
       // draft forever.
       messages = [...messages, ...continuationMessages(attempt)]
+      tools = undefined
       offset = attempt.maxIndex + 1
     }
   }

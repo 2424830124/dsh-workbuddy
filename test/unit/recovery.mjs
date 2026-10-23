@@ -44,4 +44,12 @@ assert.match(fromReasoning, /先看目录/, 'a reasoning-only turn carries its t
 const long = continuationMessages({ sawText: true, text: 'x'.repeat(10_000), reasoning: '' })[0].content[0].text
 assert.ok(long.length < 5000, 'a long draft is truncated so the continuation stays cheap')
 
-console.log('recovery.mjs: OK — one round, usage summing, index shifting, and the continuation payload verified')
+// The instruction alone is not the constraint: the adapter also drops `tools` from the
+// continuation request, because a call delivered there would restart the work being
+// repaired. Asserted here so neither half can be removed silently.
+const { readFileSync } = await import('node:fs')
+const adapterSource = readFileSync(new URL('../../src/adapter.js', import.meta.url), 'utf8')
+assert.match(adapterSource, /tools = undefined/, 'the continuation round clears the tool list')
+assert.match(adapterSource, /streamRound\(\{ \.\.\.options, messages, tools \}/, 'and streamRound receives it')
+
+console.log('recovery.mjs: OK — one round, usage summing, index shifting, the continuation payload, and the cleared tool list verified')
