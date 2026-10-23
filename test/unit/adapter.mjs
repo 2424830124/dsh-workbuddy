@@ -301,6 +301,47 @@ assert.equal(endTurn.kind, 'stop', 'end_turn is the other spelling of stop')
 const toolUse = await runWithFinishReason('tool_use')
 assert.equal(toolUse.kind, 'tool-calls', 'tool_use is the Anthropic spelling of tool_calls')
 
+// A tool-call fragment whose name never arrives cannot be announced, so it never
+// reaches `toolOrder`. When upstream then says `stop`, the step used to read as "the
+// model chose to stop" while a call was in flight — a silent drop. It must surface as
+// a retryable error instead.
+const collectCutCall = async (finishReason) => {
+  const adapter = new WorkBuddyAdapter({
+    logger: { info: () => {}, warn: () => {}, error: () => {} },
+    credentials: { resolve: async () => ({ value: 'header.payload.signature' }) },
+    get: () => undefined
+  }, REGIONS.cn)
+  adapter.catalog = []
+  adapter.catalogAt = Date.now()
+  globalThis.fetch = async () => streamOf([
+    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_x","function":{"arguments":"{\\"file_path\\":\\"a"}}]}}]}',
+    `data: {"choices":[{"delta":{},"finish_reason":"${finishReason}"}]}`,
+    'data: [DONE]',
+    ''
+  ].join('\n\n'))
+  const chunks = []
+  for await (const chunk of adapter.stream({
+    provider: 'workbuddy-cn',
+    model: 'hy3',
+    system: 'You are helpful.',
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+    signal: AbortSignal.timeout(10_000)
+  })) chunks.push(chunk)
+  return { finish: chunks.find((chunk) => chunk.type === 'finish').reason, chunks }
+}
+
+const orphanStop = await collectCutCall('stop')
+assert.equal(orphanStop.finish.kind, 'error', 'a call without a name is not a clean stop')
+assert.equal(orphanStop.finish.failure.code, 'TRANSPORT', 'and it is retryable')
+assert.match(orphanStop.finish.failure.message, /工具名/)
+assert.ok(
+  !orphanStop.chunks.some((chunk) => chunk.type === 'block-end' && chunk.block?.type === 'tool-call'),
+  'the unusable call is not handed over'
+)
+
+const orphanClaimed = await collectCutCall('tool_calls')
+assert.equal(orphanClaimed.finish.kind, 'error', 'even when upstream claims tool_calls, a nameless call is not delivered')
+
 // The official client asks for usage explicitly; the request body must match.
 assert.deepEqual(cn.buildBody({ model: 'hy3', messages: [] }, 'hy3', { id: 'hy3', name: 'Hy3', input: ['text'] }, undefined).stream_options, { include_usage: true })
 

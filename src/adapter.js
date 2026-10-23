@@ -975,6 +975,23 @@ export class WorkBuddyAdapter {
     }
 
     const argsTruncated = [...toolCalls.values()].some((block) => isTruncatedArguments(block.text))
+    // A tool-call fragment whose name never arrived cannot be announced, so it never
+    // reaches `toolOrder` — and when upstream then ends with `stop`, the step reads as
+    // "the model chose to stop" while a call was in fact in flight. That is a silent
+    // drop, so it is reported instead: the harness keeps an honest failure, and the
+    // log names what happened.
+    const orphanCalls = [...toolCalls.values()].filter((block) => !hasUsableToolName(block.name) && block.text.trim().length > 0)
+    if (orphanCalls.length > 0) {
+      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 收到 ${orphanCalls.length} 个工具调用分片但始终没有工具名（finish_reason=${finishReason ?? '(无)'}），按传输错误上报，可自动重试`)
+      yield finishChunk({
+        kind: 'error',
+        failure: {
+          message: `${this.region.provider}: 上游发送了工具调用但没有给出工具名（finish_reason=${finishReason ?? '(无)'}；可重试的传输错误）`,
+          code: 'TRANSPORT'
+        }
+      })
+      return
+    }
     // A stream that stops without the `[DONE]` sentinel was cut, not finished:
     // upstream closed the connection mid-answer. Reporting that as a normal stop
     // ends the turn silently — the model looks like it simply chose to stop — and
