@@ -13,6 +13,7 @@
  *   X-Product-Code: workbuddy, X-Agent-Purpose/Name/Type/Version, UA.
  */
 
+import { createHash, randomUUID } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -321,7 +322,7 @@ export class WorkBuddyAdapter {
   constructor(ctx, region) {
     this.ctx = ctx
     this.region = region
-    this.sessionId = crypto.randomUUID().replace(/-/g, '')
+    this.sessionId = randomUUID().replace(/-/g, '')
     this.catalog = undefined
     this.catalogAt = 0
     /** Where the current catalog came from: 'scoped' | 'config' | 'cache' | 'none'. */
@@ -358,7 +359,7 @@ export class WorkBuddyAdapter {
 
   /** A fresh conversation identity, used when the gateway rejects the old one. */
   rotateIdentity() {
-    this.sessionId = crypto.randomUUID().replace(/-/g, '')
+    this.sessionId = randomUUID().replace(/-/g, '')
   }
 
   /**
@@ -692,7 +693,24 @@ export class WorkBuddyAdapter {
     return chatRoutes(this.region)
   }
 
-  headers(token, route) {
+  /**
+   * Request headers, aligned with the official CodeBuddy CLI.
+   *
+   * The gateway validates them: a request without `X-Agent-Purpose` /
+   * `X-Conversation-*` / `X-IDE-*` is rejected with `400 code 11128 request illegal`
+   * (measured 2026-10-23), so these are not decoration. Three details come from the
+   * official bundle and were previously missing or wrong here:
+   *
+   * - `X-Agent-Intent` defaults to `craft` ("do the work" mode) there; omitting it
+   *   leaves the deployment to choose, which is the difference between an agent that
+   *   acts and one that only narrates.
+   * - `X-Conversation-Message-ID` / `X-Request-ID` identify *the message being
+   *   answered*, so they are derived from that message and stay stable when the same
+   *   step is retried, instead of a fresh random UUID per attempt.
+   * - `X-Agent-Runtime` / `X-Session-ID` / `X-Model-ID` say which runtime and model
+   *   the route is on.
+   */
+  headers(token, route, model, messageId) {
     return {
       Authorization: `Bearer ${token}`,
       Accept: 'text/event-stream',
@@ -701,21 +719,42 @@ export class WorkBuddyAdapter {
       'X-Product': 'SaaS',
       'X-Product-Code': route.productCode,
       'X-Agent-Purpose': 'conversation',
+      'X-Agent-Intent': 'craft',
+      'X-Agent-Runtime': 'local-agent',
       'X-IDE-Name': route.ideName,
       'X-IDE-Type': route.ideName,
       'X-IDE-Version': route.ideVersion,
       'User-Agent': route.userAgent,
+      'X-Session-ID': this.sessionId,
+      'X-Model-ID': model,
       'X-Conversation-ID': this.sessionId,
-      'X-Conversation-Message-ID': crypto.randomUUID(),
-      'X-Conversation-Request-ID': crypto.randomUUID()
+      'X-Conversation-Message-ID': messageId,
+      'X-Conversation-Request-ID': messageId,
+      'X-Request-ID': messageId
     }
   }
 
-  async send(token, body, signal, route) {
+  /**
+   * A stable id for the message being answered.
+   *
+   * The official client sends the message's own id in `X-Conversation-Message-ID` /
+   * `X-Request-ID`; a fresh random UUID per attempt (what this did before) tells the
+   * gateway every retry is a different message. Hashing the last user turn keeps the
+   * id stable across retries of one step and changes when the conversation moves on.
+   */
+  messageIdFor(options) {
+    const last = [...(options.messages ?? [])].reverse().find((message) => message.role === 'user')
+    const text = typeof last?.content === 'string'
+      ? last.content
+      : (Array.isArray(last?.content) ? last.content.map((block) => String(block?.text ?? '')).join('') : '')
+    return createHash('sha1').update(`${this.sessionId}:${text}`).digest('hex').slice(0, 32)
+  }
+
+  async send(token, body, signal, route, model, messageId) {
     try {
       return await fetch(`${route.endpoint}/v2/chat/completions`, {
         method: 'POST',
-        headers: this.headers(token, route),
+        headers: this.headers(token, route, model, messageId),
         body,
         signal
       })
@@ -734,10 +773,13 @@ export class WorkBuddyAdapter {
     }
     const imageUrls = await this.resolveImages(options.messages)
     const payload = () => JSON.stringify(this.buildBody(options, model, entry, imageUrls))
+    // The message being answered, hashed so every retry of the same step carries the
+    // same id (the official client uses the message's own id here).
+    const messageId = this.messageIdFor(options)
     const routes = this.routes()
     let route = routes[0]
 
-    let response = await this.send(token, payload(), options.signal, route)
+    let response = await this.send(token, payload(), options.signal, route, model, messageId)
     let rejection = ''
     if (!response.ok) {
       rejection = await response.text().catch(() => '')
@@ -750,12 +792,12 @@ export class WorkBuddyAdapter {
         dumpRejectedRequest(this.region, model, route, payload(), rejection)
         this.rotateIdentity()
         this.ctx.logger.warn(`[workbuddy] ${this.region.id}: 网关判为未获批渠道，已换会话标识重试一次`)
-        response = await this.send(token, payload(), options.signal, route)
+        response = await this.send(token, payload(), options.signal, route, model, messageId)
         rejection = response.ok ? '' : await response.text().catch(() => '')
         if (!response.ok && routes[1] !== undefined && isUnapprovedChannel(rejection)) {
           this.ctx.logger.warn(`[workbuddy] ${this.region.id}: 主通道仍被拒，改走 ${routes[1].endpoint}`)
           route = routes[1]
-          response = await this.send(token, payload(), options.signal, route)
+          response = await this.send(token, payload(), options.signal, route, model, messageId)
           rejection = response.ok ? '' : await response.text().catch(() => '')
         }
       } else if (response.status === 401 || response.status === 403) {
@@ -763,7 +805,7 @@ export class WorkBuddyAdapter {
         if (rotated.refreshed) {
           token = await readToken(this.ctx, this.region)
           if (token.length > 0) {
-            response = await this.send(token, payload(), options.signal, route)
+            response = await this.send(token, payload(), options.signal, route, model, messageId)
             rejection = response.ok ? '' : await response.text().catch(() => '')
           }
         }
