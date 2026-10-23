@@ -242,26 +242,42 @@ export async function runSweep(ctx, region, ids, options = {}) {
 }
 
 /** @returns {{ savedAt: number, lastSweepAt: number, models: Map<string, {state: string, detail: string, at: number}> }} */
-export function readAvailability(regionId) {
+/** Read the ledger as stored (no account filtering). */
+function readLedger(regionId) {
   try {
     const parsed = JSON.parse(readFileSync(ledgerPath(regionId), 'utf8'))
     if (parsed?.version !== LEDGER_VERSION || typeof parsed.models !== 'object' || parsed.models === null) {
-      return { savedAt: 0, lastSweepAt: 0, models: new Map() }
+      return { account: undefined, savedAt: 0, lastSweepAt: 0, models: new Map() }
     }
     return {
+      account: typeof parsed.account === 'string' && parsed.account.length > 0 ? parsed.account : undefined,
       savedAt: typeof parsed.savedAt === 'number' ? parsed.savedAt : 0,
       lastSweepAt: typeof parsed.lastSweepAt === 'number' ? parsed.lastSweepAt : 0,
       models: new Map(Object.entries(parsed.models))
     }
   } catch {
+    return { account: undefined, savedAt: 0, lastSweepAt: 0, models: new Map() }
+  }
+}
+
+/**
+ * @param regionId deployment id
+ * @param account when given, a ledger recorded for another account reads as empty
+ * @returns {{ savedAt: number, lastSweepAt: number, models: Map<string, {state: string, detail: string, at: number}> }}
+ */
+export function readAvailability(regionId, account) {
+  const ledger = readLedger(regionId)
+  if (account !== undefined && ledger.account !== undefined && ledger.account !== account) {
     return { savedAt: 0, lastSweepAt: 0, models: new Map() }
   }
+  return { savedAt: ledger.savedAt, lastSweepAt: ledger.lastSweepAt, models: ledger.models }
 }
 
 function store(regionId, ledger, now) {
   mkdirSync(ledgerDir(), { recursive: true })
   writeFileSync(ledgerPath(regionId), JSON.stringify({
     version: LEDGER_VERSION,
+    ...(ledger.account === undefined ? {} : { account: ledger.account }),
     savedAt: now,
     lastSweepAt: ledger.lastSweepAt,
     models: Object.fromEntries(ledger.models)
@@ -269,10 +285,18 @@ function store(regionId, ledger, now) {
 }
 
 /** Merge verdicts by id (a fresh verdict always wins) and store them. */
-export function writeAvailability(regionId, results) {
+export function writeAvailability(regionId, results, account) {
   try {
-    const ledger = readAvailability(regionId)
+    const ledger = readLedger(regionId)
     const now = Date.now()
+    // A verdict describes one account's entitlements. Writing a different account's
+    // results into the same ledger is what made a new login inherit the previous
+    // account's `denied` marks for twelve hours, so a different account starts clean.
+    if (account !== undefined && ledger.account !== account) {
+      ledger.account = account
+      ledger.models = new Map()
+      ledger.lastSweepAt = 0
+    }
     for (const result of results) {
       if (typeof result?.id !== 'string' || result.id.length === 0) continue
       ledger.models.set(result.id, {

@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto'
 
 import { WorkBuddyAdapter } from './adapter.js'
 import { registerWorkbuddyApi } from './api.js'
-import { REFRESH_BOOT_DELAY_MS, REFRESH_INTERVAL_MS, beginLogin, refreshRegion, regionStatus } from './auth.js'
+import { REFRESH_BOOT_DELAY_MS, REFRESH_INTERVAL_MS, beginLogin, logoutRegion, refreshRegion, regionStatus } from './auth.js'
 import { runSweep, sweepDue } from './availability.js'
 import { claimDailyCheckin, runAutoClaim } from './credits.js'
 import { msUntilNextMidnight } from './http.js'
@@ -74,9 +74,9 @@ async function executeCommand(ctx, adapters, invocation) {
   if (verb === 'logout') {
     const lines = []
     for (const region of regions) {
-      await ctx.credentials.unset(region.tokenRef)
-      await ctx.credentials.unset(region.metaRef)
+      await logoutRegion(ctx, region)
       adapters[region.id]?.invalidateCatalog()
+      notifyModelTopology(ctx)
       lines.push(`${region.label}：凭据已清除`)
     }
     return { kind: 'success', text: lines.join('\n') }

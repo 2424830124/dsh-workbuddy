@@ -22,7 +22,7 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node test/unit/plugin.mjs && node test/unit/api.mjs && node test/unit/client.mjs && node test/unit/region-order.mjs && node test/unit/catalog.mjs && node test/unit/catalog-cache.mjs && node test/unit/official-list.mjs && node test/unit/model-prefs.mjs && node test/unit/availability.mjs && node test/unit/adapter.mjs",
+    "test": "node test/unit/plugin.mjs && node test/unit/api.mjs && node test/unit/client.mjs && node test/unit/region-order.mjs && node test/unit/catalog.mjs && node test/unit/catalog-cache.mjs && node test/unit/official-list.mjs && node test/unit/model-prefs.mjs && node test/unit/availability.mjs && node test/unit/auth.mjs && node test/unit/adapter.mjs",
     "smoke": "node test/live/smoke.mjs"
   },
   "keywords": [

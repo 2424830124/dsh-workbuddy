@@ -44,6 +44,40 @@ const CODE_TOKEN_NOT_READY = 11217
 /** One in-flight login per region, so a repeated command reports instead of forking a second flow. */
 export const pendingLogins = new Map()
 
+/**
+ * Account generations, one per region.
+ *
+ * Every asynchronous path that later writes credentials or a catalog compares the
+ * generation it started under with the current one. Logging out or switching accounts
+ * bumps it, so a slow refresh, a background login poll, or a delayed catalog response
+ * that started before the switch can no longer resurrect the previous account.
+ */
+const generations = new Map()
+
+export function authGeneration(region) {
+  return generations.get(region.id) ?? 0
+}
+
+/** Invalidate in-flight work for this region and drop any pending login. */
+export function bumpAuthGeneration(region) {
+  generations.set(region.id, authGeneration(region) + 1)
+  pendingLogins.delete(region.id)
+  return authGeneration(region)
+}
+
+/**
+ * Log out: invalidate in-flight work first, then delete the stored credentials.
+ *
+ * The order matters — a refresh that returns after the deletion would otherwise write
+ * the old account straight back, which is exactly the bug this replaces.
+ */
+export async function logoutRegion(ctx, region) {
+  bumpAuthGeneration(region)
+  await ctx.credentials.unset(region.tokenRef)
+  await ctx.credentials.unset(region.metaRef)
+  ctx.logger.info(`[workbuddy] ${region.id}: 已退出登录，凭据已删除`)
+}
+
 function authHeaders(region, extra = {}) {
   return { 'X-Domain': region.apiDomain, 'User-Agent': region.userAgent, ...extra }
 }
@@ -169,6 +203,7 @@ export async function readToken(ctx, region) {
  * Failures are logged, never thrown: a stale token must not break the plugin.
  */
 export async function refreshRegion(ctx, region, options = {}) {
+  const generation = authGeneration(region)
   const meta = await readMeta(ctx, region)
   if (meta === undefined || typeof meta.refreshToken !== 'string' || meta.refreshToken.length === 0) {
     return { refreshed: false, reason: '未登录' }
@@ -194,6 +229,12 @@ export async function refreshRegion(ctx, region, options = {}) {
   const data = responseData(json) ?? {}
   const nextAccess = readString(data, 'accessToken')
   if (nextAccess.length === 0) return { refreshed: false, reason: '续期响应为空' }
+  // Logging out or switching accounts while the refresh was in flight invalidates this
+  // result: writing it would put the old account back.
+  if (authGeneration(region) !== generation) {
+    ctx.logger.info(`[workbuddy] ${region.id}: 续期结果已过期（期间退出或切换账号），不写回`)
+    return { refreshed: false, reason: '账号已切换' }
+  }
 
   const now = Date.now()
   const nextRefresh = readString(data, 'refreshToken')
@@ -220,25 +261,46 @@ export async function beginLogin(ctx, region, options = {}) {
   const existing = pendingLogins.get(region.id)
   if (existing !== undefined) return { started: false, url: existing.url, pending: true }
 
-  const { state, authUrl } = await fetchAuthState(region)
-  const decorated = decorateAuthUrl(authUrl, region)
-  pendingLogins.set(region.id, { url: decorated, startedAt: Date.now() })
-  if (options.open !== false) openInBrowser(decorated)
+  // Claimed before the request goes out: two concurrent calls would otherwise both
+  // start a flow, and the first to fail would delete the second one's pending entry.
+  const generation = authGeneration(region)
+  pendingLogins.set(region.id, { url: '', startedAt: Date.now() })
+  let authUrl
+  let state
+  try {
+    const fetched = await fetchAuthState(region)
+    state = fetched.state
+    authUrl = decorateAuthUrl(fetched.authUrl, region)
+    pendingLogins.set(region.id, { url: authUrl, startedAt: Date.now() })
+  } catch (error) {
+    pendingLogins.delete(region.id)
+    throw error
+  }
+  if (options.open !== false) openInBrowser(authUrl)
 
   void (async () => {
     try {
       const token = await pollAuthToken(region, state)
+      if (authGeneration(region) !== generation) {
+        ctx.logger.info(`[workbuddy] ${region.id}: 登录结果已过期（期间退出或切换账号），不写回`)
+        return
+      }
       const account = await fetchAccount(region, token, state)
+      if (authGeneration(region) !== generation) {
+        ctx.logger.info(`[workbuddy] ${region.id}: 登录结果已过期（期间退出或切换账号），不写回`)
+        return
+      }
       const stored = await storeCredential(ctx, region, token, account)
       ctx.logger.info(`[workbuddy] ${region.id}: 已登录 ${stored.nickname || stored.uid || '(未知)'}`)
       await options.onSuccess?.(stored)
     } catch (error) {
       ctx.logger.warn(`[workbuddy] ${region.id}: 登录失败 — ${error instanceof Error ? error.message : String(error)}`)
     } finally {
-      pendingLogins.delete(region.id)
+      // Only clear the entry this flow created; a newer flow owns its own.
+      if (authGeneration(region) === generation) pendingLogins.delete(region.id)
     }
   })()
-  return { started: true, url: decorated, pending: false }
+  return { started: true, url: authUrl, pending: false }
 }
 
 /** One-line account summary for the command and the panel. */

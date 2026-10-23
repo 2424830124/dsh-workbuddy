@@ -14,7 +14,7 @@ import { readFileSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
-import { beginLogin, pendingLogins, readMeta, readToken, refreshRegion, regionStatus } from './auth.js'
+import { beginLogin, logoutRegion, pendingLogins, readMeta, readToken, refreshRegion, regionStatus } from './auth.js'
 import { invalidateBusy, fetchBusyLevels } from './busy.js'
 import { SWEEP_MIN_INTERVAL_MS, availabilitySummary, readAvailability, runSweep, sweepDue, unusableModelIds } from './availability.js'
 import { claimDailyCheckin, fetchCheckinStatus, fetchCredits } from './credits.js'
@@ -549,9 +549,9 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
           return
         }
         if (path.endsWith('/logout')) {
-          await ctx.credentials.unset(region.tokenRef)
-          await ctx.credentials.unset(region.metaRef)
+          await logoutRegion(ctx, region)
           adapters[region.id]?.invalidateCatalog()
+          notifyModelTopology(ctx)
           sendJson(res, 200, await statePayload(ctx, adapters))
           return
         }
