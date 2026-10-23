@@ -31,7 +31,7 @@ src/
   api.js            面板用的宿主路由 /workbuddy/*
   index.js          apply()：provider 路由、命令、定时器
 client/index.js     设置面板（`settings.section` 槽位的客户端半边）
-test/unit/          离线单测（`npm test`，10 个）
+test/unit/          离线单测（`npm test`，12 个）
 test/live/          需要真实账号的在线探针与诊断脚本
 ```
 
