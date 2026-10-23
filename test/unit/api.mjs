@@ -18,11 +18,11 @@ import { join } from 'node:path'
 process.env.DSH_HOME = join(tmpdir(), 'dsh-workbuddy-api-test')
 rmSync(process.env.DSH_HOME, { recursive: true, force: true })
 
-const { registerWorkbuddyApi } = await import('../../src/api.js')
+const { registerWorkbuddyApi } = await import('../../src/panel/api.js')
 
 const routes = []
 // The plugin owns its credentials now: they live in $DSH_HOME/dsh-workbuddy/credentials.json.
-const { setCredential, unsetCredential } = await import('../../src/paths.js')
+const { setCredential, unsetCredential } = await import('../../src/core/paths.js')
 const store = {
   set: (ref, value) => setCredential(ref, value),
   unset: (ref) => unsetCredential(ref),

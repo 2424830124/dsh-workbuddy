@@ -11,7 +11,7 @@
  *      `node test/live/seed-official-list.mjs intl --clear`
  */
 
-import { readOfficialList, writeOfficialList } from '../../src/official-list.js'
+import { readOfficialList, writeOfficialList } from '../../src/catalog/official-list.js'
 
 const region = process.argv[2] ?? 'intl'
 const args = process.argv.slice(3)

@@ -15,31 +15,39 @@
 
 ```
 src/
-  regions.js        部署定义（端点、探测形态、聊天路由、是否支持繁忙度）
-  http.js           传输与信封工具、JWT/日期工具
-  auth.js           登录/续期协议、凭据读写、账号状态
-  catalog.js        实时目录（scoped + /v3/config 并行合并）+ 准入策略
-  catalog-cache.js  目录落盘缓存（追加、缺字段不覆盖、倍率不落盘）
-  availability.js   可用性台账（最小请求探测、分类、12 小时有效期）
-  model-prefs.js    每个模型的启停（只落盘"手工决定"）
-  official-list.js  账号名单导入（id 或记录，字段级富化，不含倍率）
-  busy.js           /v2/chat/busy 的繁忙程度（仅大陆版）
-  credits.js        积分、签到、启动/午夜自动领取
-  paths.js          插件自己的目录与凭据文档（$DSH_HOME/dsh-workbuddy/）
-  wire.js           Harness 消息 → OpenAI wire 消息（工具结果角色、配对、图片）
-  sse.js            SSE 分帧（bytes → data payload、[DONE]、取消响应体）
-  endings.js        结束分类表（finish_reason × 正文 × 工具 × 断流）
-  recovery.js       自动续写的决策与载荷
-  adapter.js        llm 适配器（请求组装、分片组装、结束分类、续写、路由回退、提示词改写）
-  api.js            面板用的宿主路由 /workbuddy/*
-  index.js          apply()：provider 路由、命令、定时器
+  index.js          apply()：provider 路由、命令、定时器（包入口，main 指向它）
+  core/
+    paths.js        插件自己的目录与凭据文档（$DSH_HOME/dsh-workbuddy/）
+    http.js         传输与信封工具、JWT/日期工具
+    regions.js      部署定义（端点、探测形态、聊天路由、是否支持繁忙度）
+    topology.js     通知 harness「可选模型变了」
+  account/
+    auth.js         登录/续期协议、凭据读写、账号状态
+    credits.js      积分、签到、启动/午夜自动领取
+  catalog/
+    catalog.js      实时目录（scoped + /v3/config 并行合并）+ 准入策略
+    catalog-cache.js 目录落盘缓存（追加、缺字段不覆盖、倍率不落盘）
+    availability.js 可用性台账（最小请求探测、分类、12 小时有效期）
+    model-prefs.js  每个模型的启停（只落盘"手工决定"；退出时整区隐藏）
+    official-list.js 账号名单导入（id 或记录，字段级富化，不含倍率）
+    busy.js         /v2/chat/busy 的繁忙程度（仅大陆版）
+  llm/
+    adapter.js      llm 适配器（请求组装、分片组装、路由回退、提示词改写）
+    wire.js         Harness 消息 → OpenAI wire 消息（工具结果角色、配对、图片）
+    sse.js          SSE 分帧（bytes → data payload、[DONE]、取消响应体）
+    endings.js      结束分类表（finish_reason × 正文 × 工具 × 断流）
+    recovery.js     自动续写的决策与载荷
+  panel/
+    api.js          面板用的宿主路由 /workbuddy/*
 client/index.js     设置面板（`settings.section` 槽位的客户端半边）
 test/unit/          离线单测（`npm test`，15 个）
 test/live/          需要真实账号的在线探针与诊断脚本
 ```
 
-依赖方向单向：`regions/http` ← `auth/catalog` ← `credits/adapter` ← `api/index`。
+依赖方向单向：`core` ← `account`/`catalog` ← `llm`/`panel` ← `index`。
 `client/index.js` **不 import 任何宿主模块**，只通过 `/workbuddy/*` 路由通信。
+它是**单文件 bundle**（`dsh.client` 只支持一个 `client.js`，`factory(require)` 只能解析已注册的
+模块），所以**不要**尝试把面板拆成多个文件 —— 拆了就得引入打包器，而本项目不引依赖。
 
 ## 不能违反的不变量
 

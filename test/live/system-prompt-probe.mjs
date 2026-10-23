@@ -13,9 +13,9 @@
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
-import { WorkBuddyAdapter } from '../../src/adapter.js'
-import { readToken } from '../../src/auth.js'
-import { REGIONS } from '../../src/regions.js'
+import { WorkBuddyAdapter } from '../../src/llm/adapter.js'
+import { readToken } from '../../src/account/auth.js'
+import { REGIONS } from '../../src/core/regions.js'
 
 const home = process.env.DSH_HOME ?? `${homedir()}/.dsh`
 const rounds = Number(process.argv[2] ?? 2)

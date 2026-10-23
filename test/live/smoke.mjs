@@ -7,8 +7,8 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { WorkBuddyAdapter } from '../../src/adapter.js'
-import { REGIONS } from '../../src/regions.js'
+import { WorkBuddyAdapter } from '../../src/llm/adapter.js'
+import { REGIONS } from '../../src/core/regions.js'
 
 const token = JSON.parse(readFileSync(new URL('../.token', import.meta.url), 'utf8'))
 const store = new Map([

@@ -11,9 +11,9 @@
  * panel asks whenever it opens, and the levels are shared between callers.
  */
 
-import { readToken } from './auth.js'
-import { requestJson } from './http.js'
-import { chatRoutes } from './regions.js'
+import { readToken } from '../account/auth.js'
+import { requestJson } from '../core/http.js'
+import { chatRoutes } from '../core/regions.js'
 
 const BUSY_TTL_MS = 50_000
 const BUSY_TIMEOUT_MS = 15_000

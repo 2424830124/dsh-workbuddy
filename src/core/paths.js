@@ -9,11 +9,15 @@
  * Credentials are written here rather than through the harness credentials service: that
  * service keeps a single document for every plugin, and this plugin's tokens have no
  * business sharing a file — or a ref namespace — with anything else.
+ *
+ * Only three things are exported because only three are used: the directory, the credential
+ * reads, and the credential writes. Path helpers with no caller were deleted rather than
+ * left as an unused API surface.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 
 /** `$DSH_HOME`, falling back to `~/.dsh` the same way the harness does. */
 function dshHome() {
@@ -22,28 +26,23 @@ function dshHome() {
     : join(homedir(), '.dsh')
 }
 
-/** The plugin's own directory. */
-export function pluginDir() {
-  return join(dshHome(), 'dsh-workbuddy')
-}
-
-/** Absolute path of a file inside {@link pluginDir}. */
-export function pluginFile(name) {
-  return join(pluginDir(), name)
-}
-
-/** Create the directory (owner-only) and return it. */
+/** The plugin's own directory, created owner-only on demand. */
 export function ensurePluginDir() {
-  const dir = pluginDir()
+  const dir = join(dshHome(), 'dsh-workbuddy')
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   return dir
+}
+
+/** Absolute path of a file inside the plugin directory. */
+function pluginFile(name) {
+  return join(ensurePluginDir(), name)
 }
 
 /**
  * Read a JSON file from the plugin directory, or `undefined` when it is missing or
  * unreadable. A corrupt file reads as absent: a broken cache must never break a start.
  */
-export function readJson(name) {
+function readJson(name) {
   try {
     return JSON.parse(readFileSync(pluginFile(name), 'utf8'))
   } catch {
@@ -55,10 +54,9 @@ export function readJson(name) {
  * Write a JSON file atomically: staged inside the directory (a temp file on another
  * volume makes `rename` fail with EXDEV), then renamed over the target.
  */
-export function writeJson(name, value, options = {}) {
-  const dir = ensurePluginDir()
+function writeJson(name, value, options = {}) {
   const target = pluginFile(name)
-  const staging = join(dir, `.${name}.${process.pid}.tmp`)
+  const staging = join(ensurePluginDir(), `.${name}.${process.pid}.tmp`)
   writeFileSync(staging, JSON.stringify(value, null, options.pretty === true ? 2 : 0), { mode: 0o600 })
   renameSync(staging, target)
   if (options.mode !== undefined) chmodSync(target, options.mode)
@@ -68,8 +66,8 @@ export function writeJson(name, value, options = {}) {
 /**
  * Credentials, kept as one small JSON document: `{ [ref]: value }`.
  *
- * Values are opaque strings — an access token, or a JSON blob of refresh metadata — so
- * this file needs no schema. Reads tolerate a missing file; writes are atomic and 0600.
+ * Values are opaque strings — an access token, or a JSON blob of refresh metadata — so this
+ * file needs no schema. Reads tolerate a missing file; writes are atomic and 0600.
  */
 const CREDENTIALS_FILE = 'credentials.json'
 
@@ -108,10 +106,3 @@ export function unsetCredential(ref) {
   delete all[ref]
   writeJson(CREDENTIALS_FILE, all, { mode: 0o600 })
 }
-
-/** Whether the credentials document exists at all (used by the panel's wording). */
-export function hasCredentialsFile() {
-  return existsSync(pluginFile(CREDENTIALS_FILE))
-}
-
-export { dirname }

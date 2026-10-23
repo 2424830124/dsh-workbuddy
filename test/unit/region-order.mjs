@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const client = readFileSync(new URL('../../client/index.js', import.meta.url), 'utf8')
-const { REGION_IDS } = await import('../../src/regions.js')
+const { REGION_IDS } = await import('../../src/core/regions.js')
 
 const placeholderBlock = /const PLACEHOLDER_REGIONS = \[([\s\S]*?)\n {4}\]/.exec(client)
 assert.ok(placeholderBlock !== null, 'the placeholder list is present')

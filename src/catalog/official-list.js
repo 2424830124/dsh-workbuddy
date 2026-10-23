@@ -30,7 +30,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { entryFromMeta, isAdvertisableId } from './catalog.js'
-import { ensurePluginDir } from './paths.js'
+import { ensurePluginDir } from '../core/paths.js'
 
 const LIST_VERSION = 1
 

@@ -8,7 +8,7 @@
  */
 import assert from 'node:assert/strict'
 
-const { classifyEnding, isToolCallReason } = await import('../../src/endings.js')
+const { classifyEnding, isToolCallReason } = await import('../../src/llm/endings.js')
 
 const PROVIDER = 'workbuddy-intl'
 const base = { streamEnded: true, finishReason: 'stop', argsTruncated: false, orphanCalls: 0, blockCount: 1, hasTools: false }

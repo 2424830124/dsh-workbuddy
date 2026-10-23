@@ -16,13 +16,13 @@ import { join } from 'node:path'
 process.env.DSH_HOME = join(tmpdir(), 'dsh-workbuddy-adapter-test')
 rmSync(process.env.DSH_HOME, { recursive: true, force: true })
 
-const { WorkBuddyAdapter } = await import('../../src/adapter.js')
-const { REGIONS } = await import('../../src/regions.js')
+const { WorkBuddyAdapter } = await import('../../src/llm/adapter.js')
+const { REGIONS } = await import('../../src/core/regions.js')
 
 const BLOCKED = 'You are an AI agent powered by DeepSeek Harness.\n\nYou are a coding agent powered by the hy3 model. Instructions follow.'
 
 // Tokens come from the plugin's own document (src/paths.js), so the fixture seeds it.
-const { setCredential } = await import('../../src/paths.js')
+const { setCredential } = await import('../../src/core/paths.js')
 setCredential(REGIONS.cn.tokenRef, 'header.payload.signature')
 setCredential(REGIONS.intl.tokenRef, 'header.payload.signature')
 

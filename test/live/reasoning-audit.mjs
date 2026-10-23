@@ -13,8 +13,8 @@
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
-import { readToken } from '../../src/auth.js'
-import { REGIONS } from '../../src/regions.js'
+import { readToken } from '../../src/account/auth.js'
+import { REGIONS } from '../../src/core/regions.js'
 
 const region = REGIONS[process.argv[2] ?? 'cn']
 

@@ -17,9 +17,9 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
-import { readToken } from '../../src/auth.js'
-import { fetchModelEntries } from '../../src/catalog.js'
-import { chatRoutes, REGIONS } from '../../src/regions.js'
+import { readToken } from '../../src/account/auth.js'
+import { fetchModelEntries } from '../../src/catalog/catalog.js'
+import { chatRoutes, REGIONS } from '../../src/core/regions.js'
 
 const region = REGIONS[process.argv[2] ?? 'intl']
 const model = process.argv[3] ?? 'step-5-preview'

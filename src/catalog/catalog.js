@@ -15,8 +15,8 @@
  * web cookie and answer 403 to a plugin token.
  */
 
-import { readString, requestJson, responseData, responseMessage } from './http.js'
-import { readToken } from './auth.js'
+import { readString, requestJson, responseData, responseMessage } from '../core/http.js'
+import { readToken } from '../account/auth.js'
 
 /**
  * @typedef {object} CatalogEntry

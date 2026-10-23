@@ -20,8 +20,8 @@
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
-import { WorkBuddyAdapter } from '../../src/adapter.js'
-import { REGIONS } from '../../src/regions.js'
+import { WorkBuddyAdapter } from '../../src/llm/adapter.js'
+import { REGIONS } from '../../src/core/regions.js'
 
 const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
 const yaml = readFileSync(credentialsPath, 'utf8')

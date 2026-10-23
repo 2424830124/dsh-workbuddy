@@ -8,12 +8,12 @@
  */
 
 import assert from 'node:assert/strict'
-import { fetchModelEntries, mergeEntries as mergeForTest, parseModelsFromConfig } from '../../src/catalog.js'
-import { REGIONS } from '../../src/regions.js'
+import { fetchModelEntries, mergeEntries as mergeForTest, parseModelsFromConfig } from '../../src/catalog/catalog.js'
+import { REGIONS } from '../../src/core/regions.js'
 
 // The plugin keeps its own credentials document now (src/paths.js), so the fixture seeds
 // that instead of a fake credentials service.
-const { setCredential } = await import('../../src/paths.js')
+const { setCredential } = await import('../../src/core/paths.js')
 setCredential(REGIONS.intl.tokenRef, 'header.payload.signature')
 setCredential(REGIONS.cn.tokenRef, 'header.payload.signature')
 

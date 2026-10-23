@@ -13,9 +13,9 @@ import { join } from 'node:path'
 process.env.DSH_HOME = join(tmpdir(), 'dsh-workbuddy-prefs-test')
 rmSync(process.env.DSH_HOME, { recursive: true, force: true })
 
-const { isEnabled, readPrefs, setEnabled } = await import('../../src/model-prefs.js')
-const { probeBody } = await import('../../src/availability.js')
-const { REGIONS } = await import('../../src/regions.js')
+const { isEnabled, readPrefs, setEnabled } = await import('../../src/catalog/model-prefs.js')
+const { probeBody } = await import('../../src/catalog/availability.js')
+const { REGIONS } = await import('../../src/core/regions.js')
 
 // Nothing decided yet: a usable model is on, an unusable one is off.
 const fresh = readPrefs('cn')

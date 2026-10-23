@@ -14,7 +14,7 @@ import { join } from 'node:path'
 process.env.DSH_HOME = join(tmpdir(), 'dsh-workbuddy-official-test')
 rmSync(process.env.DSH_HOME, { recursive: true, force: true })
 
-const { applyOfficialList, readOfficialList, writeOfficialList } = await import('../../src/official-list.js')
+const { applyOfficialList, readOfficialList, writeOfficialList } = await import('../../src/catalog/official-list.js')
 
 assert.equal(readOfficialList('intl'), undefined, 'nothing imported yet')
 

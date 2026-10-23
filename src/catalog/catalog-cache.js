@@ -31,7 +31,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { isCatalogModelId, keepModel, withConsistentEfforts } from './catalog.js'
-import { ensurePluginDir } from './paths.js'
+import { ensurePluginDir } from '../core/paths.js'
 
 const CACHE_VERSION = 1
 /** Modality order used across the catalog entries. */

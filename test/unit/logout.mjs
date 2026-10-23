@@ -13,10 +13,10 @@ import { join } from 'node:path'
 process.env.DSH_HOME = join(tmpdir(), 'dsh-workbuddy-logout-test')
 rmSync(process.env.DSH_HOME, { recursive: true, force: true })
 
-const { REGIONS } = await import('../../src/regions.js')
-const { readPrefs, isEnabled, setEnabled, markLoggedOut, clearLoggedOut } = await import('../../src/model-prefs.js')
-const { logoutRegion } = await import('../../src/auth.js')
-const { setCredential, readCredential } = await import('../../src/paths.js')
+const { REGIONS } = await import('../../src/core/regions.js')
+const { readPrefs, isEnabled, setEnabled, markLoggedOut, clearLoggedOut } = await import('../../src/catalog/model-prefs.js')
+const { logoutRegion } = await import('../../src/account/auth.js')
+const { setCredential, readCredential } = await import('../../src/core/paths.js')
 
 const region = REGIONS.cn
 const ctx = { logger: { info: () => {}, warn: () => {}, error: () => {} }, credentials: { resolve: async () => undefined } }

@@ -14,8 +14,8 @@ import { join } from 'node:path'
 process.env.DSH_HOME = join(tmpdir(), 'dsh-workbuddy-availability-test')
 rmSync(process.env.DSH_HOME, { recursive: true, force: true })
 
-const { AVAILABILITY_TTL_MS, availabilitySummary, classifyProbe, deadModelIds, probeBody, probeModel, readAvailability, runSweep, writeAvailability } = await import('../../src/availability.js')
-const { REGIONS, chatRoutes } = await import('../../src/regions.js')
+const { AVAILABILITY_TTL_MS, availabilitySummary, classifyProbe, deadModelIds, probeBody, probeModel, readAvailability, runSweep, writeAvailability } = await import('../../src/catalog/availability.js')
+const { REGIONS, chatRoutes } = await import('../../src/core/regions.js')
 
 // A deployment is probed with **its own** credential and route, never the other
 // one's: an overseas model asked with a mainland token would answer nonsense.
@@ -30,7 +30,7 @@ globalThis.fetch = async (url, init) => {
   }
 }
 // Credentials come from the plugin's own document now (src/paths.js).
-const { setCredential } = await import('../../src/paths.js')
+const { setCredential } = await import('../../src/core/paths.js')
 setCredential(REGIONS.cn.tokenRef, `token-for-${REGIONS.cn.tokenRef}`)
 setCredential(REGIONS.intl.tokenRef, `token-for-${REGIONS.intl.tokenRef}`)
 

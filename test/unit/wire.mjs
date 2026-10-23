@@ -8,7 +8,7 @@
  */
 import assert from 'node:assert/strict'
 
-const { toWireMessages, toolResultCallId, resolveToolPairing, contentToText } = await import('../../src/wire.js')
+const { toWireMessages, toolResultCallId, resolveToolPairing, contentToText } = await import('../../src/llm/wire.js')
 
 // --- a result message answers its call -------------------------------------
 const toolMessage = { role: 'tool', source: { kind: 'tool', callId: 'call_1' }, content: [{ type: 'text', text: 'done' }] }

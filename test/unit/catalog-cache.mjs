@@ -15,7 +15,7 @@ import { join } from 'node:path'
 process.env.DSH_HOME = join(tmpdir(), 'dsh-workbuddy-cache-test')
 rmSync(process.env.DSH_HOME, { recursive: true, force: true })
 
-const { readCatalogCache, writeCatalogCache } = await import('../../src/catalog-cache.js')
+const { readCatalogCache, writeCatalogCache } = await import('../../src/catalog/catalog-cache.js')
 
 assert.equal(readCatalogCache('cn'), undefined, 'no cache before the first write')
 

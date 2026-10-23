@@ -19,9 +19,9 @@
  */
 
 import { readMeta, readToken } from './auth.js'
-import { localDayKey, requestJson, responseCode, responseMessage } from './http.js'
-import { REGIONS } from './regions.js'
-import { setCredential } from './paths.js'
+import { localDayKey, requestJson, responseCode, responseMessage } from '../core/http.js'
+import { REGIONS } from '../core/regions.js'
+import { setCredential } from '../core/paths.js'
 
 const USER_RESOURCE_PATH = '/v2/billing/meter/get-user-resource'
 const CHECKIN_STATUS_PATH = '/v2/billing/meter/checkin-status'

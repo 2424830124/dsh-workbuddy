@@ -6,8 +6,8 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { fetchCheckinStatus, fetchCredits, claimDailyCheckin } from '../../src/credits.js'
-import { REGIONS } from '../../src/regions.js'
+import { fetchCheckinStatus, fetchCredits, claimDailyCheckin } from '../../src/account/credits.js'
+import { REGIONS } from '../../src/core/regions.js'
 
 const token = JSON.parse(readFileSync(new URL('../.token', import.meta.url), 'utf8'))
 const store = new Map([

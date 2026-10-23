@@ -9,8 +9,8 @@
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
-import { fetchModelEntries } from '../../src/catalog.js'
-import { REGIONS } from '../../src/regions.js'
+import { fetchModelEntries } from '../../src/catalog/catalog.js'
+import { REGIONS } from '../../src/core/regions.js'
 
 const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
 const text = readFileSync(credentialsPath, 'utf8')

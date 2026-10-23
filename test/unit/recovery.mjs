@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict'
 
-const { RECOVERY_ROUNDS, mergeUsage, shiftChunk, continuationMessages } = await import('../../src/recovery.js')
+const { RECOVERY_ROUNDS, mergeUsage, shiftChunk, continuationMessages } = await import('../../src/llm/recovery.js')
 
 // One continuation per turn, which is what the adapter loops over.
 assert.equal(RECOVERY_ROUNDS, 1)
@@ -48,7 +48,7 @@ assert.ok(long.length < 5000, 'a long draft is truncated so the continuation sta
 // continuation request, because a call delivered there would restart the work being
 // repaired. Asserted here so neither half can be removed silently.
 const { readFileSync } = await import('node:fs')
-const adapterSource = readFileSync(new URL('../../src/adapter.js', import.meta.url), 'utf8')
+const adapterSource = readFileSync(new URL('../../src/llm/adapter.js', import.meta.url), 'utf8')
 assert.match(adapterSource, /tools = undefined/, 'the continuation round clears the tool list')
 assert.match(adapterSource, /streamRound\(\{ \.\.\.options, messages, tools \}/, 'and streamRound receives it')
 

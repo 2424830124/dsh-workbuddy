@@ -13,9 +13,9 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { zstdDecompressSync } from 'node:zlib'
 
-import { WorkBuddyAdapter } from '../../src/adapter.js'
-import { readToken } from '../../src/auth.js'
-import { REGIONS } from '../../src/regions.js'
+import { WorkBuddyAdapter } from '../../src/llm/adapter.js'
+import { readToken } from '../../src/account/auth.js'
+import { REGIONS } from '../../src/core/regions.js'
 
 const home = process.env.DSH_HOME ?? `${homedir()}/.dsh`
 const paragraphIndex = Number(process.argv[2] ?? 17)

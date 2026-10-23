@@ -9,9 +9,9 @@
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
-import { runSweep, availabilitySummary } from '../../src/availability.js'
-import { readToken } from '../../src/auth.js'
-import { REGIONS } from '../../src/regions.js'
+import { runSweep, availabilitySummary } from '../../src/catalog/availability.js'
+import { readToken } from '../../src/account/auth.js'
+import { REGIONS } from '../../src/core/regions.js'
 
 const region = REGIONS[process.argv[2] ?? 'cn']
 const sweepAll = process.argv.includes('all')
@@ -25,7 +25,7 @@ const ctx = {
   } }
 }
 
-const { fetchModelEntries } = await import('../../src/catalog.js')
+const { fetchModelEntries } = await import('../../src/catalog/catalog.js')
 const token = await readToken(ctx, region)
 const loaded = await fetchModelEntries(ctx, region)
 const targets = loaded.entries.filter((entry) => sweepAll || entry.official !== true)

@@ -32,9 +32,9 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { accountIdOf, readToken } from './auth.js'
-import { chatRoutes } from './regions.js'
-import { ensurePluginDir } from './paths.js'
+import { accountIdOf, readToken } from '../account/auth.js'
+import { chatRoutes } from '../core/regions.js'
+import { ensurePluginDir } from '../core/paths.js'
 
 const LEDGER_VERSION = 1
 /** How long a probe verdict is trusted before the model is swept again. */

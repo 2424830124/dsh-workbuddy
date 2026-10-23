@@ -13,7 +13,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { REGIONS, chatRoutes } from '../../src/regions.js'
+import { REGIONS, chatRoutes } from '../../src/core/regions.js'
 
 const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
 const token = (/^[ \t]*WORKBUDDY_INTL_TOKEN:[ \t]*(.+)$/m.exec(readFileSync(credentialsPath, 'utf8'))?.[1] ?? '').trim().replace(/^["']|["']$/g, '')

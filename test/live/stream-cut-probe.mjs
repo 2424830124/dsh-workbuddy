@@ -17,9 +17,9 @@
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
-import { WorkBuddyAdapter } from '../../src/adapter.js'
-import { readToken } from '../../src/auth.js'
-import { REGIONS } from '../../src/regions.js'
+import { WorkBuddyAdapter } from '../../src/llm/adapter.js'
+import { readToken } from '../../src/account/auth.js'
+import { REGIONS } from '../../src/core/regions.js'
 
 const region = REGIONS[process.argv[2] ?? 'cn']
 const count = Number(process.argv[3] ?? 5)

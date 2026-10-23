@@ -21,7 +21,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { ensurePluginDir } from './paths.js'
+import { ensurePluginDir } from '../core/paths.js'
 
 const PREFS_VERSION = 1
 

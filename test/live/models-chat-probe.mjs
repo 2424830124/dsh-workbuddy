@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
-import { REGIONS, chatRoutes } from '../../src/regions.js'
+import { REGIONS, chatRoutes } from '../../src/core/regions.js'
 
 const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
 const token = (/^[ \t]*WORKBUDDY_CN_TOKEN:[ \t]*(.+)$/m.exec(readFileSync(credentialsPath, 'utf8'))?.[1] ?? '').trim().replace(/^["']|["']$/g, '')

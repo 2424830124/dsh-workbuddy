@@ -11,9 +11,9 @@
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
-import { readToken } from '../../src/auth.js'
-import { REGIONS } from '../../src/regions.js'
-import { chatRoutes } from '../../src/regions.js'
+import { readToken } from '../../src/account/auth.js'
+import { REGIONS } from '../../src/core/regions.js'
+import { chatRoutes } from '../../src/core/regions.js'
 
 const home = process.env.DSH_HOME ?? `${homedir()}/.dsh`
 const region = REGIONS.cn

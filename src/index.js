@@ -15,15 +15,15 @@
 
 import { randomUUID } from 'node:crypto'
 
-import { WorkBuddyAdapter } from './adapter.js'
-import { registerWorkbuddyApi } from './api.js'
-import { REFRESH_BOOT_DELAY_MS, REFRESH_INTERVAL_MS, beginLogin, logoutRegion, refreshRegion, regionStatus } from './auth.js'
-import { runSweep, sweepDue } from './availability.js'
-import { claimDailyCheckin, runAutoClaim } from './credits.js'
-import { msUntilNextMidnight } from './http.js'
-import { readPrefs } from './model-prefs.js'
-import { REGIONS, REGION_IDS, regionList } from './regions.js'
-import { notifyModelTopology } from './topology.js'
+import { WorkBuddyAdapter } from './llm/adapter.js'
+import { registerWorkbuddyApi } from './panel/api.js'
+import { REFRESH_BOOT_DELAY_MS, REFRESH_INTERVAL_MS, beginLogin, logoutRegion, refreshRegion, regionStatus } from './account/auth.js'
+import { runSweep, sweepDue } from './catalog/availability.js'
+import { claimDailyCheckin, runAutoClaim } from './account/credits.js'
+import { msUntilNextMidnight } from './core/http.js'
+import { readPrefs } from './catalog/model-prefs.js'
+import { REGIONS, REGION_IDS, regionList } from './core/regions.js'
+import { notifyModelTopology } from './core/topology.js'
 
 export const name = 'dsh-workbuddy'
 export const inject = ['commands', 'credentials', 'llm']

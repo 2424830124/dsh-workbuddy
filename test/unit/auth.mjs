@@ -14,13 +14,13 @@ import { join } from 'node:path'
 process.env.DSH_HOME = join(tmpdir(), 'dsh-workbuddy-auth-test')
 rmSync(process.env.DSH_HOME, { recursive: true, force: true })
 
-const { REGIONS } = await import('../../src/regions.js')
-const { authGeneration, bumpAuthGeneration, logoutRegion, refreshRegion, beginLogin, pendingLogins } = await import('../../src/auth.js')
+const { REGIONS } = await import('../../src/core/regions.js')
+const { authGeneration, bumpAuthGeneration, logoutRegion, refreshRegion, beginLogin, pendingLogins } = await import('../../src/account/auth.js')
 
 const region = REGIONS.intl
 
 /** The plugin's own credential document, behind the same little surface the tests use. */
-const { readCredential, setCredential, unsetCredential } = await import('../../src/paths.js')
+const { readCredential, setCredential, unsetCredential } = await import('../../src/core/paths.js')
 
 const createStore = (initial = {}) => {
   for (const [ref, value] of Object.entries(initial)) setCredential(ref, value)

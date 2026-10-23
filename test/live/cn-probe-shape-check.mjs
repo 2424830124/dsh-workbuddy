@@ -9,8 +9,8 @@
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
-import { probeBody } from '../../src/availability.js'
-import { chatRoutes, REGIONS } from '../../src/regions.js'
+import { probeBody } from '../../src/catalog/availability.js'
+import { chatRoutes, REGIONS } from '../../src/core/regions.js'
 
 const region = REGIONS.cn
 const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`

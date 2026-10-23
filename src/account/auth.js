@@ -23,10 +23,10 @@ import {
   sleep,
   tokenExpiryMs,
   tokenNickname
-} from './http.js'
-import { resolveCredential, setCredential, unsetCredential } from './paths.js'
-import { clearLoggedOut, markLoggedOut } from './model-prefs.js'
-import { REGION_IDS, REGIONS, openInBrowser } from './regions.js'
+} from '../core/http.js'
+import { resolveCredential, setCredential, unsetCredential } from '../core/paths.js'
+import { clearLoggedOut, markLoggedOut } from '../catalog/model-prefs.js'
+import { REGION_IDS, REGIONS, openInBrowser } from '../core/regions.js'
 
 const LOGIN_TIMEOUT_MS = 5 * 60_000
 const POLL_INTERVAL_MS = 1_500
