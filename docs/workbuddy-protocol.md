@@ -860,6 +860,39 @@ provider 与全部 HTTP 路由都没注册，设置面板只剩一个 `HTTP 404`
 | 流空闲监控 | `setInterval` + `streamIdleTimeoutMs`（日志 `Stream idle monitor armed`） | **没有**（依赖 harness 自身超时） | 无 |
 | 请求体改写 | 模型不支持工具时 `stripToolDefinitions`（连 `tool_choice` 一起去掉）、图片扁平化、自定义模型 URL 规整 | CN：系统提示词指纹改写（`Illegal API invocation`）+ 换会话标识重试一次 | — |
 
+#### 12.1 请求体逐字段对照（2026-10-23 补）
+
+官方 `providerData` 里还有 `thinking:{type:'disabled'}`（关闭思考时才发；开启时不发该字段）、
+`reasoning_effort`（档位）。逐字段差异与影响判断：
+
+| 字段 | 本插件 | 官方 CLI | 影响 |
+| --- | --- | --- | --- |
+| `model` / `messages` / `stream` / `tools` / `max_tokens` | 发 | 发 | 一致 ✓ |
+| `stream_options.include_usage` | 发（0.1.8 起） | 发 | 已对齐 ✓ |
+| `tool_choice` / `parallel_tool_calls` | 不发 | 发（配置值） | 服务端默认 `auto` / `true`，等价 ✓ |
+| `temperature` / `top_p` / `frequency_penalty` / `presence_penalty` | **不发**（仅调用方给 temperature 时发） | **总是发**（模型配置值，缺省 `DEFAULT_TEMPERATURE`） | **真实差异**，但实测对"提前收尾"无影响（默认/0.2/0.5/0.7/0.3+top_p0.9 各 8 次：2/8、2/8、3/8、3/8，同一水平）→ 暂不跟随，避免擅自改变输出风格 |
+| `reasoning_effort` | 发（目录档位；无档位不发） | 发（同左） | 一致 ✓ |
+| `thinking` | deepseek 系总发 `{type:'enabled'}` | **开启时不发**；关闭时发 `{type:'disabled'}` | 小差异：我们多带一个 `enabled`，实测被接受且行为正确 ✓（不发更贴近官方，但无收益，暂留） |
+| `prompt_cache_key` | 发（会话级） | **不发** | 反向差异；实测对本问题无影响（去掉后 1/8 vs 2/8），保留以提高前缀缓存命中 ✓ |
+| `stop` | 仅调用方给 | 不发 | 等价 ✓ |
+| `store` / `prompt_cache_retention` | 不发 | 发（配置值，通常未设置） | 等价 ✓ |
+| 请求头 | `Authorization` / `Accept` / `X-Domain` / `X-Product` / `X-Product-Code` / `User-Agent` | 同类内部头（`X-User-Id`/`X-Enterprise-Id`/`X-Tenant-Id`/`X-Department-Info`/`X-Domain`/`User-Agent`），且会剔除内部头再转发 | 我们的头是目录/聊天都验证过可用的最小集合 ✓ |
+
+**结论：结构上不是"完全一样"，但没有一处会造成"提前收尾"** —— 唯一的实质差异是官方总带采样参数，
+而实测它对这个问题无效。`refusal` 的含义见 §12.2。
+
+#### 12.2 `finish_reason: "refusal"` 是什么
+
+官方把 `refusal` 与 `content_filter` 归为同一类 `stopReason:"refusal"`，它的来源（读官方 bundle）：
+
+1. **输入侧内容安全拦截**：`prepareSensitiveUserPrompt` 判定 `deny` 时直接返回
+   `stopReason:"refusal"`（日志 `Sensitive user prompt blocked before history`）——**请求根本没发出去**；
+2. **模型/厂商主动拒绝**：`isContentPolicyRefusal(...)` 判定的内容策略拒绝；
+3. 本地命令执行失败等"请求没能完成"的收尾，也复用 `refusal`。
+
+所以 `refusal` ≠ 网络问题、≠ 截断，而是**"这次不回答"**。正确反应是**不重试**（重试会得到同样的拒绝），
+把原因告诉用户 —— 本插件现在正是这样（`INVALID_REQUEST` + 明确文案，见 §4.5）。
+
 三条结论：
 
 1. **我们和官方在"结束原因"上原本差一张表** —— 官方把 `refusal`/`content_filter` 单独归类、
