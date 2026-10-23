@@ -934,6 +934,12 @@ provider 与全部 HTTP 路由都没注册，设置面板只剩一个 `HTTP 404`
 | `test/live/dead-code-report.mjs` | 死代码审计：未使用的 CSS 类、词典键、导出 |
 | `test/live/installed-package-check.mjs [dir]` | 检查**已安装副本**（真目录、依赖为空、provider 注册、选择器可选项、资源齐全） |
 | `test/live/leak-scan.mjs [ref]` | 发布前必跑：工作区 + git 历史的账户信息/凭据泄露扫描 |
+| **CN 指纹排查（遇到 11128 "未获批渠道"先跑这些）** | |
+| `test/live/cn-prompt-bisect.mjs [模型]` | 完整提示词 vs 去掉某段，快速判断当前规则命中哪一层 |
+| `test/live/cn-prompt-fingerprint.mjs [模型]` | 对完整提示词做段落级二分，直接指出被拦的那一段（规则变了先跑它） |
+| `test/live/cn-fingerprint-sentence.mjs [段号] [模型]` | 段内句子级二分，定位到具体句子 |
+| `test/live/cn-fingerprint-length.mjs [模型]` / `cn-fingerprint-word.mjs` / `cn-fingerprint-count.mjs` | 判定是否按长度 / 单个词 / 出现次数触发 |
+| `test/live/cn-header-bisect.mjs [模型]` | 逐个去掉请求头与字段，确认拦截是否与头有关 |
 | **会话取证（"回答为什么中断"）** | |
 | `test/live/session-tail-live.mjs [前缀] [步数] [项目过滤]` | 读最新会话的末尾几步；容残帧（`ZSTD_e_flush`），带 `stopReason`/`outputTokens`/正文 |
 | `test/live/last-finishes.mjs [前缀] [步数] [项目过滤]` | 只看每步的 `upstream.stopReason` 与"stop 且无工具调用"的步，附分布统计 |
