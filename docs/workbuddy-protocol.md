@@ -623,6 +623,7 @@ Web 应用（cookie 认证，路径**不带 `/v2` 前缀**）还会调 📖✅�
 | 400 | 12403 | `check ua, get coding copilot version error` | CN `/v3/config` 拒绝插件令牌 | 目录改走 scoped ✅ |
 | — | 12151 | account not ready | 账号信息未就绪 | 继续轮询 📖 |
 | 429 | 6020 | `queue.waiting.title` | 模型排队；`data` 含 `queue_position` / `queue_size` / `retry_after`(秒) | `RATE_LIMIT` + 交给 harness 退避 ✅ |
+| 429 | — | `usage exceeds frequency limit, but don't worry, your usage will reset at <时间> UTC+8, alternatively, you can switch to the other models to continue using it` | **账号用量频率超限**（免费档的配额窗口）：文案自带重置时间与"可以换其它模型"的建议 | `RATE_LIMIT`；`requestFailure()` 会把重置时间与解释拼进给 harness 的报错文案 ✅（2026-10-23 实测，海外版；重试 5 次仍 429 后由 harness 上报 `[RATE_LIMIT]`） |
 | — | 6004 | — | 频率限制（另一产品族的码） | `RATE_LIMIT` 📖 |
 | 400 | 10001 / 1001 | `今天已签到，请明天再来` | 今日签到已领 | 视为成功 ✅📖 |
 | — | 1002 / 1003 | — | 无领取资格 / 活动已结束 | 不重试 📖 |

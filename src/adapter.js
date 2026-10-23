@@ -175,6 +175,18 @@ function requestFailure(provider, status, body) {
     const position = queue.position === undefined ? '' : `（队列第 ${queue.position} 位）`
     return llmError(`${provider}: 模型排队中${position}，将自动重试`, 'RATE_LIMIT', { status })
   }
+  // Upstream's frequency limit is not a transport failure: it says the account has used
+  // its quota for now, names the reset time, and suggests another model. Retrying is
+  // pointless, and the caller deserves the explanation rather than a bare code — so the
+  // message carries the reset time when upstream sent one.
+  if (status === 429 || /exceeds frequency limit|usage exceeds/i.test(body)) {
+    const reset = /reset at ([0-9T:.+\-Z ]+)/i.exec(body)?.[1]?.trim()
+    const parts = [`${provider}: 用量频率超限（账号配额，不是插件或网络问题）`]
+    if (reset !== undefined && reset.length > 0) parts.push(`额度将于 ${reset} 重置`)
+    if (/switch to the other models?/i.test(body)) parts.push('期间可以换用其它模型')
+    parts.push(`上游原文：${errorDetail(body).slice(0, 200)}`)
+    return llmError(parts.join('；'), 'RATE_LIMIT', { status })
+  }
   return llmError(`${provider}: ${errorDetail(body)}`, httpErrorCode(status, body), { status })
 }
 
