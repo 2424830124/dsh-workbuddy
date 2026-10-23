@@ -195,12 +195,10 @@ function toWireMessages(messages, imageUrls) {
 }
 
 export {
-  TOOL_RESULT_IMAGE_TEXT,
   contentToText,
   hasUsableToolName,
   normalizeToolArguments,
   resolveToolPairing,
   toolResultCallId,
-  toWireMessages,
-  userContentParts
+  toWireMessages
 }

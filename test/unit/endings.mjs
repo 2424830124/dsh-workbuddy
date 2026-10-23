@@ -15,7 +15,11 @@ const base = { streamEnded: true, finishReason: 'stop', argsTruncated: false, or
 const classify = (overrides) => classifyEnding({ ...base, ...overrides }, PROVIDER)
 
 // --- ordinary endings -----------------------------------------------------
-assert.deepEqual(classify({}), { kind: 'stop', note: undefined })
+// The reason becomes the harness's finish chunk, which is rejected unless it survives a
+// JSON round trip — so an absent note is omitted, never `undefined`.
+assert.deepEqual(classify({}), { kind: 'stop' })
+assert.equal(Object.hasOwn(classify({}), 'note'), false)
+assert.equal(Object.hasOwn(classify({ finishReason: 'length' }), 'failure'), false, 'a non-error carries no failure key')
 assert.equal(classify({ finishReason: 'end_turn' }).kind, 'stop')
 assert.equal(classify({ finishReason: 'stop_sequence' }).kind, 'stop')
 assert.equal(classify({ hasTools: true }).kind, 'tool-calls')

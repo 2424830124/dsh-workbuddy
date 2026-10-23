@@ -68,7 +68,11 @@ export function classifyEnding({ streamEnded, finishReason, argsTruncated, orpha
   // for a call, and reporting `stop` would end the turn as if it had finished.
   if (hasTools || TOOL_CALLS.has(finishReason)) return { kind: 'tool-calls' }
   if (BUDGETS.has(finishReason)) return { kind: 'max-tokens', note: 'budget' }
-  return { kind: 'stop', note: finishReason === undefined ? 'done-without-reason' : undefined }
+  // No `note: undefined` here: this object becomes the harness's finish chunk, and a
+  // property whose value is undefined is dropped by any serializer, which makes the chunk
+  // "not losslessly JSON-serializable" and gets it rejected. Omit optional keys instead.
+  if (finishReason === undefined) return { kind: 'stop', note: 'done-without-reason' }
+  return { kind: 'stop' }
 }
 
 /** Whether this `finish_reason` is one of the tool-call spellings. */

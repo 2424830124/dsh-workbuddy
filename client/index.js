@@ -410,7 +410,11 @@ window.__ModuleLoader__.load({
 .wb-tag { display: inline-block; padding: 0 6px; border-radius: 5px; font-size: 11px; line-height: 17px;
   background: var(--wb-surface-hover); color: var(--wb-text); }
 .wb-tag-accent { background: var(--wb-accent-soft); color: var(--wb-accent-strong); }
-.wb-model-off .wb-model-name, .wb-model-off .wb-model-rate { opacity: .45; }
+/* A switched-off row dims its narrative parts — the name and the rate text — but not the
+   「免费」 chip: what a model costs is a fact about the model, not a consequence of the
+   switch, and dimming it reads as "unknown" at a glance. */
+.wb-model-off .wb-model-name { opacity: .45; }
+.wb-model-off .wb-model-rate > :not(.wb-tag-accent) { opacity: .45; }
 .wb-model-detail { padding: 12px 14px 14px 38px; border-top: 1px dashed var(--wb-line-soft);
   display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 48px; }
 .wb-detail { display: flex; gap: 10px; font-size: 12.5px; line-height: 1.65; min-width: 0; }
