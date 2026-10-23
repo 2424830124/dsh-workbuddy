@@ -975,6 +975,20 @@ export class WorkBuddyAdapter {
     }
 
     const argsTruncated = [...toolCalls.values()].some((block) => isTruncatedArguments(block.text))
+    // A step that ends with prose and no tool call *looks* like the model choosing to
+    // stop, so nothing else records it — and "it stopped mid-answer" arrives as a bug
+    // report with no evidence. These two shapes are the ones seen in practice:
+    // an announcement that expects a next action ("……：" / "………") and a statement of
+    // inability ("我需要先读取…" / "我无法…"). Logging them with the raw reason and the
+    // text turns the next report into a fact.
+    if (streamEnded === true && toolOrder.length === 0 && (finishReason === 'stop' || finishReason === undefined)) {
+      const prose = blocks.find((block) => block.kind === 'text')?.text ?? ''
+      const tail = prose.trim()
+      const suspicious = /[:：…]$/.test(tail) || /(我需要|我没有|我无法|先读取|无法直接|不能直接)/.test(tail)
+      if (suspicious) {
+        this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 疑似提前收尾（finish_reason=${finishReason ?? '(无)'}，输出 ${outputTokens ?? '未知'} tokens，无工具调用）：「${tail.slice(0, 60)}」`)
+      }
+    }
     // A stream that stops without the `[DONE]` sentinel was cut, not finished:
     // upstream closed the connection mid-answer. Reporting that as a normal stop
     // ends the turn silently — the model looks like it simply chose to stop — and
