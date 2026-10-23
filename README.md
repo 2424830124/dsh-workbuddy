@@ -306,15 +306,6 @@ node test/live/policy-probe.mjs       # 两版白名单与准入结果对照
 - **思考档位只认服务端声明的 `reasoning.supportedEfforts`**（两个源合并后国内 15/34、国际 21/28）；只声明了默认档的模型不给档位列表 —— 与网页端行为一致。合并后仍无档位的，请求里不带 `reasoning_effort`，由服务端取默认。
 - 实时**繁忙程度**只有大陆版有（`POST /v2/chat/busy`，海外版 404，`regions.js` 的 `hasBusy` 决定那一列是否显示）。它**不是可用性信号**：只对白名单内的活跃模型返回 `idle/normal/busy/congested`，其余一律 `unknown`（面板显示「未知」，不当成故障）。插件侧 50 秒缓存，与官方前端一致。
 - 两版**条目数会变**：2026-10-22 实测大陆版 30 个（`ok` 22 / `dead` 8）、海外版 25 个（`ok` 13 / `denied` 12）。`gpt-5.3-codex` 只在账号名单里，两个 `/v3/config` 都没有它，倍率因此是「未知」。
-- **长上下文下模型会"说话说一半就收尾"（上游行为，非插件问题）**：海外版 `deepseek-v4.1-flash` 在上下文很长时会不调用工具、只用一句话叙述下一步然后 `finish_reason: "stop"`（例如「我需要先读取该文件，才能准确修改。」）。实测（2026-10-22，`node test/live/long-context-probe.mjs`）：
-
-  | 输入规模 | 正确调用工具 | 提前 `stop` |
-  | --- | --- | --- |
-  | 0k（1 条消息） | 2/2 | 0/2 |
-  | 30k 字符（613 条） | 2/2 | 0/2 |
-  | 89k 字符（1825 条） | 1/2 | **1/2** |
-
-  用户侧复现阈值约 **120k 上下文**起明显（其它模型未测）。判据是**换了上下文长度、其它一切不变**即可复现/消失，且流里**一个 tool-call 分片都没有**、`finish_reason` 就是 `stop` —— 所以既不是适配器丢帧（丢帧会看到 `finish_reason: "tool_calls"`），也不是采样（四档温度 16/16 正常）、不是工具 schema（70 个工具 / 单个 / 简化 schema 9/9 正常）。`stop` 是模型自己采到 EOS，属于上游质量问题；缓解手段只有换模型、把会话压短（harness 的压缩），或回一句"继续"。
 
 ## 上游行为与错误映射
 
@@ -359,7 +350,6 @@ node test/live/stream-cut-probe.mjs cn --selftest     # 离线验证"断流"分�
 node test/live/stream-cut-probe.mjs intl 10 --long    # 真实压测断流率（免费模型零消耗）
 node test/live/find-message.mjs "关键词" <会话前缀>     # 按文本定位某一步，并打出前后事件
 node test/live/dump-stream.mjs <会话前缀> <seq,…>      # 打印那一步存下来的原始流帧
-node test/live/sampling-probe.mjs intl 4              # 同一提示在各 temperature 下的"提前 stop"率
 ```
 
 ## 许可

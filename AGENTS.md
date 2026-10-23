@@ -62,18 +62,37 @@ test/live/          需要真实账号的在线探针与诊断脚本
    （`rememberUnusable`）。新增类似的写入路径时照做。
 8. **思考恒为开启，没有"关闭思考"开关。** 上游只发 `reasoning.canDisableThinking` 这个
    布尔位，却从没给出能兑现它的请求参数（实测见协议文档 §4.3.1），所以目录解析直接忽略
-   该字段、面板也不摆开关 —— **能调的只有档位**（`supportedEfforts`）。
-   不要重新引入这个字段，也不要凭空发明关闭参数；真要支持，先验证出参数，再把它做成一个档位。
+   该字段、面板也不摆开关 —— **能调的只有档位**。
+   档位规则**对所有模型一致**，不看模型名：调用方选的档位（且该模型声明了它）→ 目录里的
+   `defaultEffort` → `high` → 首档；一个档位都没声明就不发 `reasoning_effort`。
+   请求里**不发 `thinking` 字段**（2026-10-23 实测：带不带它对是否思考没有影响，`max` 档下
+   不带反而思考更多；官方客户端只在关闭思考时才发 `{type:'disabled'}`）。
+   不要重新引入 `canDisableThinking`，也不要凭空发明关闭参数或按模型名分支。
 9. **流必须以 `data: [DONE]` 收尾。** 没有 `[DONE]`、也没有 `finish_reason` 就断流，是连接被
    掐断，必须上报 `TRANSPORT` 错误（让重试策略接管），**绝不能映射成 `stop`** —— 否则用户看到
    的是"话说一半就停了，还不重试"，而且日志里什么都没有。同理，**参数被截断的工具调用不要
    交付**（它是坏 JSON，交出去只会变成工具解析错误）：丢掉它并报 `max-tokens`，让 harness
    自己续跑该步骤（协议文档 §4.5）。
+   **`finish_reason` 要按整张表映射**（对齐官方 CLI 的 `mapFinishReasonToStopReason`）：
+   `stop`/`end_turn`/`stop_sequence` → `stop`；`tool_calls`/`tool_use`/`function_call` → `tool-calls`；
+   `length`/`max_tokens` → `max-tokens`；`refusal`/`content_filter` → **不可重试的
+   `INVALID_REQUEST` 错误**（不是 stop）；`error` → `TRANSPORT`（可重试）；未知值记日志后按 `stop`。
+   **有工具调用分片但始终没有工具名**时同样必须是 `TRANSPORT` 错误 —— 那个调用无法交付，
+   静默丢弃会让整步看起来像模型自己收尾（协议文档 §12.2）。
 10. **finish 帧必须带 `response` 诊断块**（`kind`/`version`/`api`/`provider`/`model`/`responseId`/
     `stopReason`/`outputTokens`/`blocks`），由 `finishChunk()` 统一生成 —— **所有** finish 出口都走它。
    它不是 harness 的契约字段（`dsh-llm` 类型里没有 `response`/`stopReason`），纯属遥测：会话数据
    诊断会原样显示，用来回答"这一步是谁答的、上游 id 是什么"。不要绕过 `finishChunk()` 手写
    `{type:'finish'}`，那样诊断里就只剩一个 `reason`，排查时又得从 `request/header` 反推。
+11. **聊天请求必须带齐语义头**，否则网关直接 `400 code 11128 request illegal`（2026-10-23 实测：
+    少了 `X-Agent-Purpose` / `X-Conversation-*` / `X-IDE-*` 就是这个结果）。取值来自官方 CLI 的
+    常量：`X-Agent-Intent: craft`（"动手干活"模式，此前漏发）、`X-Agent-Runtime: local-agent`、
+    `X-Session-ID` / `X-Model-ID`，以及 `X-Conversation-Message-ID` / `X-Request-ID` ——
+    后两个标识**被回答的那条消息**，必须由消息内容导出（同一重试保持不变），
+    不要每条请求都随机 UUID。
+12. **请求体与官方的唯一实质差异是采样参数**：官方总带 `temperature`/`top_p`/两个 penalty，
+    我们只在调用方显式传 `temperature` 时才发。实测（默认/0.2/0.5/0.7/0.3+top_p0.9 各 8 次）
+    对"提前收尾"没有影响，所以不跟随；真要改，先拿数据说话（协议文档 §12.1）。
 
 ## 开发流程
 
@@ -109,6 +128,17 @@ node test/live/harness-contract-replay.mjs   # 复刻 harness 校验，定位"�
 node test/live/availability-sweep.mjs cn     # 可用性全量探测
 node test/live/leak-scan.mjs                 # 发布前必跑：账户信息/凭据泄露扫描
 ```
+
+**"回答为什么停在这里"** 用会话取证探针（会话日志是多帧 zstd，最新帧常是残帧，这两个脚本
+用 `ZSTD_e_flush` 容错）：
+
+```sh
+node test/live/session-tail-live.mjs [会话前缀] [步数] [项目过滤]   # 末尾几步 + stopReason + 正文
+node test/live/last-finishes.mjs "" [步数] dsh-model-picker          # 每步 stopReason 与分布统计
+```
+
+`finish` 帧的 `response.stopReason` 是上游原话：`stop`（模型自己结束）、`tool_calls`、
+`max_tokens`、`refusal`（被拒/被过滤）、`error`。**先看这个再猜原因**。
 
 完整清单在协议文档附录。
 

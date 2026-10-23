@@ -394,7 +394,7 @@ data: [DONE]
 | INTL scoped → `500`（openresty/APISIX，HTML 错误页） | 2026-10-21 起持续；`/v3/config` 正常 ✅ |
 | `glm-5.1` 图片能力两个端点矛盾 | scoped 报 `false`、`/v3/config` 报 `true`，实测能看图（📖 参考实现据此写了覆盖白名单） |
 | 目录包含渠道不服务的模型 | 见 `11102`（§6）✅ |
-| 长上下文下"说话说一半就收尾"（`finish_reason: stop`，无工具调用） | 上游/模型行为，**不是插件问题**。实测：同一提示、同一套工具、只改前面的对话长度 —— 0k 2/2 正常、30k 1/2（一次 181 字后 `stop`）、89k 1/2；每次 finish 诊断块都标 `workbuddy-intl/deepseek-v4.1-flash`。判据：流里**没有任何 tool-call 分片**、`finish_reason` 就是 `stop`（若丢帧会是 `tool_calls` 且能看到分片）。已排除：采样（四档温度 16/16 正常）、工具 schema/数量（70 个 / 单个 / 简化 schema 9/9 正常）、提示词校验（海外版无此错误，请求体按原样转发）。复现：`node test/live/long-context-probe.mjs 2`；排查：`node test/live/toolcall-audit.mjs <会话前缀>`、`sampling-probe.mjs`、`tools-probe.mjs`。缓解只有换模型/压缩上下文/回一句"继续" —— 合法的 `stop` 不能当错误重试。 |
+| 长上下文下"说话说一半就收尾"（`finish_reason: stop`，无工具调用） | 上游/模型行为，**不是插件问题**。实测：同一提示、同一套工具、只改前面的对话长度 —— 0k 2/2 正常、30k 1/2（一次 181 字后 `stop`）、89k 1/2；每次 finish 诊断块都标 `workbuddy-intl/deepseek-v4.1-flash`。判据：流里**没有任何 tool-call 分片**、`finish_reason` 就是 `stop`（若丢帧会是 `tool_calls` 且能看到分片）。已排除：采样（四档温度 16/16 正常）、工具 schema/数量（70 个 / 单个 / 简化 schema 9/9 正常）、提示词校验（海外版无此错误，请求体按原样转发）。复现：`node test/live/long-context-probe.mjs 2`；排查：`node test/live/toolcall-audit.mjs <会话前缀>`、`long-context-probe.mjs`、`repro-probe.mjs`。缓解只有换模型/压缩上下文/回一句"继续" —— 合法的 `stop` 不能当错误重试。 |
 
 ### 4.7 模型选择器里每一项元数据的来源
 
@@ -876,7 +876,7 @@ provider 与全部 HTTP 路由都没注册，设置面板只剩一个 `HTTP 404`
 | `prompt_cache_key` | 发（会话级） | **不发** | 反向差异；实测对本问题无影响（去掉后 1/8 vs 2/8），保留以提高前缀缓存命中 ✓ |
 | `stop` | 仅调用方给 | 不发 | 等价 ✓ |
 | `store` / `prompt_cache_retention` | 不发 | 发（配置值，通常未设置） | 等价 ✓ |
-| 请求头 | `Authorization` / `Accept` / `X-Domain` / `X-Product` / `X-Product-Code` / `User-Agent` | 同类内部头（`X-User-Id`/`X-Enterprise-Id`/`X-Tenant-Id`/`X-Department-Info`/`X-Domain`/`User-Agent`），且会剔除内部头再转发 | 我们的头是目录/聊天都验证过可用的最小集合 ✓ |
+| 请求头 | `Authorization` / `Accept` / `X-Domain` / `X-Product` / `X-Product-Code` / `X-Agent-Purpose` / **`X-Agent-Intent: craft`** / `X-Agent-Runtime` / `X-IDE-Name` / `X-IDE-Type` / `X-IDE-Version` / `X-Session-ID` / `X-Model-ID` / `X-Conversation-ID` / **`X-Conversation-Message-ID`** / `X-Conversation-Request-ID` / **`X-Request-ID`** / `User-Agent` | 同类内部头（`X-User-Id`/`X-Enterprise-Id`/`X-Tenant-Id`/`X-Department-Info`/`X-Domain`/`User-Agent`），转发前还会**剔除**内部头 | **网关会校验**：2026-10-23 实测，裸请求缺 `X-Agent-Purpose`/`X-Conversation-*`/`X-IDE-*` → `400 code 11128 request illegal`。已按官方常量对齐（`X-Agent-Intent` 默认 `craft`；`X-Conversation-Message-ID`/`X-Request-ID` 标识"被回答的那条消息"，用最后一条 user 消息的哈希，重试时保持不变） |
 
 **结论：结构上不是"完全一样"，但没有一处会造成"提前收尾"** —— 唯一的实质差异是官方总带采样参数，
 而实测它对这个问题无效。`refusal` 的含义见 §12.2。
@@ -916,6 +916,22 @@ provider 与全部 HTTP 路由都没注册，设置面板只剩一个 `HTTP 404`
 | `test/live/picker-contract-check.mjs` | 适配器实际给模型选择器什么（`providerInfo` / `listModels` / `resolveModel`） |
 | `test/live/harness-contract-replay.mjs` | 复刻 harness 校验规则，定位「选择器整组消失」 |
 | `test/live/dead-code-report.mjs` | 死代码审计：未使用的 CSS 类、词典键、导出 |
+| `test/live/installed-package-check.mjs [dir]` | 检查**已安装副本**（真目录、依赖为空、provider 注册、选择器可选项、资源齐全） |
+| `test/live/leak-scan.mjs [ref]` | 发布前必跑：工作区 + git 历史的账户信息/凭据泄露扫描 |
+| **会话取证（"回答为什么中断"）** | |
+| `test/live/session-tail-live.mjs [前缀] [步数] [项目过滤]` | 读最新会话的末尾几步；容残帧（`ZSTD_e_flush`），带 `stopReason`/`outputTokens`/正文 |
+| `test/live/last-finishes.mjs [前缀] [步数] [项目过滤]` | 只看每步的 `upstream.stopReason` 与"stop 且无工具调用"的步，附分布统计 |
+| `test/live/find-message.mjs "关键词" [会话前缀]` | 按正文定位某一步，并打出前后事件 |
+| `test/live/dump-stream.mjs [会话前缀] <seq,…>` | 打印某一步存下来的原始流帧（含 finish 的 `response` 诊断块） |
+| `test/live/toolcall-audit.mjs [会话前缀] [步数]` | 上游宣告了工具调用、但一个分片都没交付的"丢失指纹" |
+| **流与请求结构实验（改协议相关代码前跑）** | |
+| `test/live/stream-cut-probe.mjs [cn\|intl] [次数] [模型] [--selftest]` | 断流分类：`--selftest` 离线自检，长回答模式可压测断流率 |
+| `test/live/repro-probe.mjs [次数] [模型] [填充字符]` | 长上下文 + 真实 70 工具集下"是否调用工具"，每行打印原始 `finish_reason` |
+| `test/live/long-context-probe.mjs [次数] [模型]` | 只改上下文长度，看提前收尾率（可复现的对照实验） |
+| `test/live/context-size-probe.mjs [字符数…]` | 填充上下文实际值多少 token（网关 `inputTokens` 为准） |
+| `test/live/thinking-field-probe.mjs [次数] [模型] [部署]` | 带/不带 `thinking` 字段时思考量对比（档位才是开关） |
+| `test/live/request-structure.mjs` / `test/live/free-models.mjs` | 各厂商请求结构、免费档清单的逐字段试探 |
+| `test/live/verify-policy.mjs` | 实时目录扣掉台账里 `dead` 的判定后，两版的条目数对照 |
 | **契约与 UI 参考（写 UI 插件用）** | |
 | `test/live/slot-inventory.mjs [outFile]` | 列出客户端实际渲染的所有插槽 |
 | `test/live/model-seat-kind-probe.mjs` | 模型席位的 kind 与占用者（决定能不能接管） |

@@ -224,7 +224,7 @@ export function entryFromMeta(id, meta) {
  * normally. So this is a preference order and a "officially sanctioned" marker,
  * never a filter.
  */
-export function whitelistedIds(agents) {
+function whitelistedIds(agents) {
   if (!Array.isArray(agents)) return []
   for (const agentName of ['cli', 'craft']) {
     const agent = agents.find((entry) => typeof entry === 'object' && entry !== null && entry.name === agentName)
