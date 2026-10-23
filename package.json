@@ -1,6 +1,6 @@
 {
   "name": "@huai_xin/dsh-workbuddy",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "WorkBuddy model provider for DeepSeek Harness (international + China deployments)",
   "type": "module",
   "main": "./src/index.js",
