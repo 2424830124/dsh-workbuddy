@@ -205,6 +205,56 @@ assert.match(failure.message, /第 1144 位/)
 assert.match(failure.message, /自动重试/)
 assert.ok(!failure.message.includes('queue.waiting.title'), 'the raw i18n key must not reach the transcript')
 
+// The same 429 carries two other meanings, and neither is retryable: an empty balance lasts
+// until someone pays, and a used-up rate window lasts until its stated reset. Both were
+// `RATE_LIMIT`, so a free-tier user watched five pointless retries and then the real reason.
+const exhausted = async (status, body, expectCode) => {
+  const adapter = new WorkBuddyAdapter({
+    logger: { info: () => {}, warn: () => {}, error: () => {} },
+    credentials: { resolve: async () => ({ value: 'header.payload.signature' }) },
+    get: () => undefined
+  }, REGIONS.intl)
+  adapter.catalog = []
+  adapter.catalogAt = Date.now()
+  globalThis.fetch = async () => new Response(body, { status, headers: { 'content-type': 'application/json' } })
+  let caught
+  try {
+    for await (const chunk of adapter.stream({
+      provider: 'workbuddy-intl',
+      model: 'deepseek-v4.1-flash-sg',
+      system: 'You are helpful.',
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+      signal: AbortSignal.timeout(10_000)
+    })) void chunk
+  } catch (error) {
+    caught = error
+  }
+  assert.ok(caught !== undefined, `expected a failure for ${expectCode}`)
+  assert.equal(caught.code, expectCode)
+  return caught
+}
+
+// 14018 is the real shape the overseas deployment returns (measured 2026-10-23).
+const quota = await exhausted(429, JSON.stringify({
+  error: { data: { code: 14018, msg: 'Credits exhausted. Please visit the link below to purchase add-on packs and get more credits: https://www.codebuddy.ai/profile/usage', requestId: 'x' } }
+}), 'QUOTA')
+assert.match(quota.message, /积分已用尽/)
+assert.match(quota.message, /充值/)
+assert.match(quota.message, /Credits exhausted/, 'the upstream text stays for reference')
+
+// The free tier's frequency window: same code, and the reset time is carried along.
+const window = await exhausted(429, JSON.stringify({
+  code: 429,
+  msg: "usage exceeds frequency limit, but don't worry, your usage will reset at 2026-10-24 09:54:53 UTC+8, alternatively, you can switch to the other models to continue using it."
+}), 'QUOTA')
+assert.match(window.message, /频率超限/)
+assert.match(window.message, /2026-10-24 09:54:53/)
+assert.match(window.message, /换用其它模型/)
+
+// Neither is retryable, so neither may be spelled RATE_LIMIT.
+assert.notEqual(quota.code, 'RATE_LIMIT')
+assert.notEqual(window.code, 'RATE_LIMIT')
+
 // ---------------------------------------------------------------------------
 // How a stream ends decides whether a short answer is retried or silently kept.
 //

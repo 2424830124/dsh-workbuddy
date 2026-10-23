@@ -167,10 +167,16 @@ function queueNotice(body) {
 /**
  * One non-2xx response → the LlmError the retry policy classifies.
  *
- * The queue case deliberately reports only `RATE_LIMIT`: retrying is the
- * harness's own exponential backoff (`dsh-llm-retry`, five attempts with
- * jitter), and the upstream `retry_after` hint is not forwarded, so one policy
- * owns the cadence instead of two.
+ * Three things arrive as `429` and they are not the same:
+ *
+ * - `6020 queue.waiting.title` — the model is busy. Retrying helps, so `RATE_LIMIT`.
+ * - `14018 Credits exhausted` — the balance is empty. No amount of backoff refills it, and
+ *   retrying only delays the honest answer by the full budget (five attempts, up to ten
+ *   seconds apart). `QUOTA`, which the harness does not retry.
+ * - `usage exceeds frequency limit…reset at <time>` — the account's window is used up until
+ *   a stated time. Same argument: waiting out five retries cannot cross that window, so
+ *   `QUOTA` as well. (It was `RATE_LIMIT` before, which made a free-tier user watch five
+ *   pointless retries for a limit that resets tomorrow.)
  */
 function requestFailure(provider, status, body) {
   const queue = queueNotice(body)
@@ -178,17 +184,20 @@ function requestFailure(provider, status, body) {
     const position = queue.position === undefined ? '' : `（队列第 ${queue.position} 位）`
     return llmError(`${provider}: 模型排队中${position}，将自动重试`, 'RATE_LIMIT', { status })
   }
-  // Upstream's frequency limit is not a transport failure: it says the account has used
-  // its quota for now, names the reset time, and suggests another model. Retrying is
-  // pointless, and the caller deserves the explanation rather than a bare code — so the
-  // message carries the reset time when upstream sent one.
+  // Balance exhausted: the message is worth passing through verbatim, because it names the
+  // page where credits are bought. Not retryable — an empty balance stays empty.
+  if (/14018|credits exhausted|insufficient|balance/i.test(body)) {
+    return llmError(`${provider}: 积分已用尽，请到上游充值后再试（不是插件或网络问题）；上游原文：${errorDetail(body).slice(0, 200)}`, 'QUOTA', { status })
+  }
+  // The account's rate window is used up until a stated time. Not retryable: the reset is
+  // hours away, not backoff-length away.
   if (status === 429 || /exceeds frequency limit|usage exceeds/i.test(body)) {
     const reset = /reset at ([0-9T:.+\-Z ]+)/i.exec(body)?.[1]?.trim()
     const parts = [`${provider}: 用量频率超限（账号配额，不是插件或网络问题）`]
     if (reset !== undefined && reset.length > 0) parts.push(`额度将于 ${reset} 重置`)
     if (/switch to the other models?/i.test(body)) parts.push('期间可以换用其它模型')
     parts.push(`上游原文：${errorDetail(body).slice(0, 200)}`)
-    return llmError(parts.join('；'), 'RATE_LIMIT', { status })
+    return llmError(parts.join('；'), 'QUOTA', { status })
   }
   return llmError(`${provider}: ${errorDetail(body)}`, httpErrorCode(status, body), { status })
 }
