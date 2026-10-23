@@ -18,6 +18,7 @@ import { writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { hasUsableToolName, normalizeToolArguments, toWireMessages } from './wire.js'
 import { accountIdOf, readToken, refreshRegion } from './auth.js'
 import { unusableModelIds, readAvailability, writeAvailability } from './availability.js'
 import { fetchModelEntries } from './catalog.js'
@@ -28,7 +29,6 @@ import { chatRoutes } from './regions.js'
 import { notifyModelTopology } from './topology.js'
 
 const CATALOG_TTL_MS = 10 * 60_000
-const TOOL_RESULT_IMAGE_TEXT = 'Attached image(s) from tool result:'
 
 /**
  * Where the last rejected request is written. A channel rejection depends on
@@ -37,19 +37,57 @@ const TOOL_RESULT_IMAGE_TEXT = 'Attached image(s) from tool result:'
  */
 const REJECTED_DUMP_PATH = join(tmpdir(), 'dsh-workbuddy-rejected.json')
 
+/**
+ * Keep a *summary* of the request the gateway refused, never the request itself.
+ *
+ * The full body carries the whole conversation, every tool result and the user's files;
+ * writing that to a fixed temp path leaves their content on disk for anything that reads
+ * the directory later. What the comparison actually needs is shape: which roles, how
+ * long, which tool names, and how the system prompt opens — the fingerprint is decided
+ * by those, not by the user's text. Set `WORKBUDDY_DUMP_BODY=1` to also keep the body
+ * when diagnosing by hand.
+ */
+function summariseRequest(payload) {
+  let body
+  try {
+    body = JSON.parse(payload)
+  } catch {
+    return { bytes: payload.length, parseable: false }
+  }
+  const messages = Array.isArray(body.messages) ? body.messages : []
+  const messages_out = messages.map((message) => ({
+    role: String(message?.role ?? '?'),
+    chars: JSON.stringify(message?.content ?? '').length,
+    ...(Array.isArray(message?.tool_calls) ? { toolCalls: message.tool_calls.map((call) => call?.function?.name ?? '?') } : {})
+  }))
+  const system = messages.find((message) => message?.role === 'system')
+  return {
+    bytes: payload.length,
+    fields: Object.keys(body).sort(),
+    messageCount: messages.length,
+    roles: messages.map((message) => String(message?.role ?? '?')),
+    messages: messages_out,
+    systemHead: typeof system?.content === 'string' ? system.content.slice(0, 200) : undefined,
+    systemChars: typeof system?.content === 'string' ? system.content.length : undefined,
+    tools: Array.isArray(body.tools) ? body.tools.map((tool) => tool?.function?.name ?? '?') : []
+  }
+}
+
 function dumpRejectedRequest(region, model, route, payload, error) {
   try {
+    const summary = summariseRequest(payload)
+    const dumpBody = process.env.WORKBUDDY_DUMP_BODY === '1'
     writeFileSync(REJECTED_DUMP_PATH, JSON.stringify({
       at: new Date().toISOString(),
       region: region.id,
       model,
       endpoint: route.endpoint,
       productCode: route.productCode,
-      bytes: payload.length,
       error: String(error).slice(0, 600),
-      body: payload
+      summary,
+      ...(dumpBody ? { body: payload } : {})
     }, null, 2))
-    console.warn(`[workbuddy] ${region.id}: 被拒请求已写入 ${REJECTED_DUMP_PATH}`)
+    console.warn(`[workbuddy] ${region.id}: 被拒请求的形状已写入 ${REJECTED_DUMP_PATH}${dumpBody ? '（含完整 body，WORKBUDDY_DUMP_BODY=1）' : '（不含正文）'}`)
   } catch {
     // diagnostics only
   }
@@ -142,25 +180,6 @@ function requestFailure(provider, status, body) {
 
 /* ── harness message → OpenAI wire ─────────────────────────────────────────── */
 
-function contentToText(content) {
-  if (typeof content === 'string') return content
-  if (!Array.isArray(content)) return ''
-  return content
-    .filter((block) => typeof block === 'object' && block !== null && block.type === 'text')
-    .map((block) => String(block.text ?? ''))
-    .join('')
-}
-
-function normalizeToolArguments(raw) {
-  const trimmed = String(raw ?? '').trim()
-  if (trimmed.length === 0) return '{}'
-  try {
-    const parsed = JSON.parse(trimmed)
-    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? trimmed : '{}'
-  } catch {
-    return '{}'
-  }
-}
 
 function isTruncatedArguments(raw) {
   const trimmed = String(raw ?? '').trim()
@@ -173,170 +192,8 @@ function isTruncatedArguments(raw) {
   }
 }
 
-const hasUsableToolName = (name) => typeof name === 'string' && name.trim().length > 0
 
-/** Keep only tool call/result pairs that are complete on both sides. */
-/**
- * The call id a result message answers.
- *
- * The harness answers a call with a message of its own: `{ role: 'tool', source: {
- * kind: 'tool', callId } }`. Older transcripts put the result inside the content
- * blocks as `{ type: 'tool-result', toolCallId }`; both are read here so neither
- * shape loses its pairing.
- */
-function toolResultCallId(message) {
-  if (message?.role !== 'tool') return undefined
-  const id = message.source?.callId ?? message.toolCallId ?? message.tool_call_id
-  return id === undefined || id === null ? undefined : String(id)
-}
 
-function resolveToolPairing(messages) {
-  const allResultIds = new Set()
-  for (const message of messages) {
-    const standalone = toolResultCallId(message)
-    if (standalone !== undefined) { allResultIds.add(standalone); continue }
-    for (const block of Array.isArray(message.content) ? message.content : []) {
-      if (block?.type === 'tool-result') allResultIds.add(String(block.toolCallId))
-    }
-  }
-  const keepCallIds = new Set()
-  for (const message of messages) {
-    if (message.role !== 'assistant') continue
-    const calls = (Array.isArray(message.content) ? message.content : [])
-      .filter((block) => block?.type === 'tool-call' && hasUsableToolName(block.name))
-    if (calls.length > 0 && calls.every((block) => allResultIds.has(String(block.id)))) {
-      for (const block of calls) keepCallIds.add(String(block.id))
-    }
-  }
-  return { keepCallIds, keepResultIds: new Set(keepCallIds) }
-}
-
-function userContentParts(content, imageUrls) {
-  const parts = []
-  let hasImage = false
-  for (const block of content) {
-    if (typeof block !== 'object' || block === null) continue
-    if (block.type === 'text') {
-      parts.push({ type: 'text', text: String(block.text ?? '') })
-      continue
-    }
-    if (block.type === 'image') {
-      const attachmentId = block.attachment?.attachmentId
-      const url = attachmentId === undefined ? undefined : imageUrls?.get(String(attachmentId))
-      parts.push(url === undefined ? { type: 'text', text: '[image unavailable]' } : { type: 'image_url', image_url: { url } })
-      hasImage = true
-      continue
-    }
-    if (block.type === 'tool-result' && Array.isArray(block.content)) {
-      const inner = userContentParts(block.content, imageUrls)
-      if (inner !== undefined) {
-        parts.push(...inner)
-        hasImage = true
-      } else {
-        parts.push({ type: 'text', text: contentToText(block.content) })
-      }
-    }
-  }
-  return hasImage && parts.length > 0 ? parts : undefined
-}
-
-/**
- * Convert harness messages into the OpenAI-compatible wire array, matching the
- * shape the official clients send (including `reasoning_content` replay on
- * assistant turns, which WorkBuddy accepts).
- */
-function toWireMessages(messages, imageUrls) {
-  const wire = []
-  let pendingToolImages = []
-  const flushToolImages = () => {
-    if (pendingToolImages.length === 0) return
-    wire.push({ role: 'user', content: [{ type: 'text', text: TOOL_RESULT_IMAGE_TEXT }, ...pendingToolImages] })
-    pendingToolImages = []
-  }
-  const { keepCallIds, keepResultIds } = resolveToolPairing(messages)
-
-  for (const message of messages) {
-    if (message.role === 'assistant') {
-      const content = Array.isArray(message.content) ? message.content : []
-      const toolCalls = content
-        .filter((block) => block?.type === 'tool-call' && keepCallIds.has(String(block.id)))
-        .map((block) => ({
-          id: String(block.id),
-          type: 'function',
-          function: { name: String(block.name), arguments: normalizeToolArguments(block.arguments) }
-        }))
-      const reasoning = content.filter((block) => block?.type === 'reasoning').map((block) => String(block.text ?? '')).join('')
-      const textContent = contentToText(content)
-      if (textContent.trim().length === 0 && toolCalls.length === 0) continue
-      flushToolImages()
-      wire.push({
-        role: 'assistant',
-        content: textContent.length === 0 && toolCalls.length > 0 ? null : textContent,
-        ...(reasoning.length > 0 ? { reasoning_content: reasoning } : {}),
-        ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
-      })
-      continue
-    }
-    if (message.role === 'system' || message.role === 'developer') {
-      flushToolImages()
-      wire.push({ role: 'system', content: contentToText(message.content) })
-      continue
-    }
-    // A tool result arrives as a message of its own (see `toolResultCallId`); it must
-    // stay a `tool` message, or the model loses which call it answers.
-    const resultCallId = toolResultCallId(message)
-    if (resultCallId !== undefined) {
-      if (!keepResultIds.has(resultCallId)) continue
-      let resultText = '(no output)'
-      if (imageUrls !== undefined && Array.isArray(message.content)) {
-        const resultParts = userContentParts(message.content, imageUrls)
-        if (resultParts !== undefined) {
-          pendingToolImages.push(...resultParts.filter((part) => part.type !== 'text'))
-          const joined = resultParts.filter((part) => part.type === 'text').map((part) => String(part.text)).join('')
-          if (joined.length > 0) resultText = joined
-        } else {
-          resultText = contentToText(message.content) || '(no output)'
-        }
-      } else {
-        resultText = contentToText(message.content) || '(no output)'
-      }
-      wire.push({ role: 'tool', tool_call_id: resultCallId, content: resultText })
-      continue
-    }
-
-    const content = Array.isArray(message.content) ? message.content : []
-    const toolResults = content.filter((block) => block?.type === 'tool-result')
-    const regular = content.filter((block) => block?.type !== 'tool-result')
-    const text = contentToText(message.content)
-    const parts = userContentParts(regular, imageUrls)
-    if (parts !== undefined) {
-      flushToolImages()
-      wire.push({ role: 'user', content: parts })
-    } else if (text.trim().length > 0) {
-      flushToolImages()
-      wire.push({ role: 'user', content: text })
-    }
-    for (const result of toolResults) {
-      if (!keepResultIds.has(String(result.toolCallId))) continue
-      let resultText = '(no output)'
-      if (imageUrls !== undefined && Array.isArray(result.content)) {
-        const resultParts = userContentParts(result.content, imageUrls)
-        if (resultParts !== undefined) {
-          pendingToolImages.push(...resultParts.filter((part) => part.type !== 'text'))
-          const joined = resultParts.filter((part) => part.type === 'text').map((part) => String(part.text)).join('')
-          if (joined.length > 0) resultText = joined
-        } else {
-          resultText = contentToText(result.content) || '(no output)'
-        }
-      } else {
-        resultText = contentToText(result.content) || '(no output)'
-      }
-      wire.push({ role: 'tool', tool_call_id: String(result.toolCallId), content: resultText })
-    }
-  }
-  flushToolImages()
-  return wire
-}
 
 function collectImageRefs(content, refs) {
   for (const raw of Array.isArray(content) ? content : []) {
@@ -775,11 +632,18 @@ export class WorkBuddyAdapter {
    * id stable across retries of one step and changes when the conversation moves on.
    */
   messageIdFor(options) {
-    const last = [...(options.messages ?? [])].reverse().find((message) => message.role === 'user')
+    const messages = options.messages ?? []
+    // Position matters: two identical "继续" turns are different messages, and hashing
+    // only the text gave both the same id — one conversation slot for two requests.
+    let index = -1
+    for (let cursor = messages.length - 1; cursor >= 0; cursor -= 1) {
+      if (messages[cursor]?.role === 'user') { index = cursor; break }
+    }
+    const last = index === -1 ? undefined : messages[index]
     const text = typeof last?.content === 'string'
       ? last.content
       : (Array.isArray(last?.content) ? last.content.map((block) => String(block?.text ?? '')).join('') : '')
-    return createHash('sha1').update(`${this.sessionId}:${text}`).digest('hex').slice(0, 32)
+    return createHash('sha1').update(`${this.sessionId}:${index}:${messages.length}:${text}`).digest('hex').slice(0, 32)
   }
 
   async send(token, body, signal, route, model, messageId) {
@@ -1098,6 +962,9 @@ export class WorkBuddyAdapter {
       })
       return
     } finally {
+      // Cancel before releasing: when the loop stopped at `[DONE]` the rest of the body
+      // was never read, and releasing the lock alone leaves that connection open.
+      await reader.cancel().catch(() => undefined)
       reader.releaseLock()
     }
 
