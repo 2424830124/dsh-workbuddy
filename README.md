@@ -198,7 +198,7 @@ node test/unit/adapter.mjs        # 提示词改写、请求体组装、聊天�
 把面板**真的渲染出来**，断言输出里有账号、分组、模型名、促销与繁忙标签、倍率与「未知」。
 面板是一个大函数，少了某个 helper 或词典键在应用里就是一片空白，只有这一层能拦住。
 
-需要真实账号的在线探针（读取 `$DSH_HOME/.credentials.yaml`，需要先登录过）：
+需要真实账号的在线探针（读取 `$DSH_HOME/dsh-workbuddy/credentials.json`，需要先在面板里登录过）：
 
 ```sh
 node test/live/smoke.mjs              # 端到端：目录 → 对话 → 工具调用
@@ -268,7 +268,7 @@ node test/live/policy-probe.mjs       # 两版白名单与准入结果对照
   - **`无权限`（橙）**：`11158`（账号档位不够）+ `11128`（被判定为未获批渠道，即"被拦截"）；
   - **`未知`（灰）**：其余无法下结论的报错（5xx、凭据、请求形状被拒），原始报文留在悬停提示里。
   `ok` 与未检测都不显示标签。**分组只看结论**：`不可用模型` = 前两种，其余（含未知、排队中）留在 `可用模型` 组——没被证伪的就不当成不能用。
-- 台账落盘：`$DSH_HOME/cache/dsh-workbuddy/availability-<region>.json`，按 id 记 `{state, detail, at}`，新结果覆盖旧结果、其它条目保留；不可用判定的**有效期 12 小时**，过期后该模型按可用对待（并在下次检测时复验）。同一文件还记 `lastSweepAt`，用于"多久才能自动再扫一次"。
+- 台账落盘：`$DSH_HOME/dsh-workbuddy/availability-<region>.json`，按 id 记 `{state, detail, at}`，新结果覆盖旧结果、其它条目保留；不可用判定的**有效期 12 小时**，过期后该模型按可用对待（并在下次检测时复验）。同一文件还记 `lastSweepAt`，用于"多久才能自动再扫一次"。
 - **自学习**：真实对话里若某个模型回 `11102` 或 `11158`，适配器直接把这条写进台账并失效目录缓存——不需要等下一次检测，也不额外花任何请求。
 - **触发方式**：
   - 打开设置面板即触发一次**自动**检测（按部署节流：国内 10 分钟、国际 24 小时）；
@@ -277,7 +277,7 @@ node test/live/policy-probe.mjs       # 两版白名单与准入结果对照
   - `GET /workbuddy/availability?region=cn&refresh=1[&manual=1]`。
 - 结果（2026-10-21 21:2x，国内全量 30 个，零消耗）：`ok` 22 / `dead` 8（`glm-5.0`、`hy4-preview-x`、`glm-4.7`、`glm-4.6`、`glm-4.6v`、`minimax-m2.5`、`kimi-k2-thinking`、`hunyuan-2.0-thinking`）。海外版全量 24 个：`ok` 12 / `denied` 12（GPT 系列 + `grok-4.7` + `gemini-3.x-flash`）。
 
-### 每个模型的开关（`$DSH_HOME/cache/dsh-workbuddy/enabled-<region>.json`）
+### 每个模型的开关（`$DSH_HOME/dsh-workbuddy/enabled-<region>.json`）
 面板里每行右侧有一个开关，决定该模型**是否出现在模型选择器里**（面板本身始终保留它，随时可以开回来）：
 
 - **默认跟随检测结果**：`dead` / `denied` 默认**关**，其余默认**开**——不用手工维护就能得到一份合理的列表。
@@ -286,7 +286,7 @@ node test/live/policy-probe.mjs       # 两版白名单与准入结果对照
 - 一键操作：工具栏「一键启停」（整个列表翻转）、分组标题旁的「全部启用 / 全部停用」（就那一组）。
 - 接口：`POST /workbuddy/enabled {region, id|ids, enabled}`，`reset:true` 表示"忘掉手工决定、回到检测默认"。
 
-### 本地缓存（`$DSH_HOME/cache/dsh-workbuddy/catalog-<region>.json`）
+### 本地缓存（`$DSH_HOME/dsh-workbuddy/catalog-<region>.json`）
 
 上游偶尔取不到时不再"忽有忽无"：最后一次成功读取会落盘，两个实时源都失败时启用，面板标「本地缓存 (时间)」。
 

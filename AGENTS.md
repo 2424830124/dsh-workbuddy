@@ -25,13 +25,16 @@ src/
   official-list.js  账号名单导入（id 或记录，字段级富化，不含倍率）
   busy.js           /v2/chat/busy 的繁忙程度（仅大陆版）
   credits.js        积分、签到、启动/午夜自动领取
+  paths.js          插件自己的目录与凭据文档（$DSH_HOME/dsh-workbuddy/）
   wire.js           Harness 消息 → OpenAI wire 消息（工具结果角色、配对、图片）
   sse.js            SSE 分帧（bytes → data payload、[DONE]、取消响应体）
+  endings.js        结束分类表（finish_reason × 正文 × 工具 × 断流）
+  recovery.js       自动续写的决策与载荷
   adapter.js        llm 适配器（请求组装、分片组装、结束分类、续写、路由回退、提示词改写）
   api.js            面板用的宿主路由 /workbuddy/*
   index.js          apply()：provider 路由、命令、定时器
 client/index.js     设置面板（`settings.section` 槽位的客户端半边）
-test/unit/          离线单测（`npm test`，12 个）
+test/unit/          离线单测（`npm test`，15 个）
 test/live/          需要真实账号的在线探针与诊断脚本
 ```
 
@@ -134,7 +137,8 @@ test/live/          需要真实账号的在线探针与诊断脚本
 
 ## 在线探针
 
-需要真实账号（`$DSH_HOME/.credentials.yaml` 里的 `WORKBUDDY_INTL_TOKEN` / `WORKBUDDY_CN_TOKEN`），
+需要真实账号（`$DSH_HOME/dsh-workbuddy/credentials.json` 里的 `WORKBUDDY_INTL_TOKEN` / `WORKBUDDY_CN_TOKEN`，
+由面板登录写入；不再使用宿主的 `.credentials.yaml`），
 所以**不会**在 CI 里跑。常用：
 
 ```sh

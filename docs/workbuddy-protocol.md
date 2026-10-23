@@ -1000,7 +1000,7 @@ provider 与全部 HTTP 路由都没注册，设置面板只剩一个 `HTTP 404`
 | `test/unit/availability.mjs` | 探测分类、TTL 内的 dead 规则、合并、分部署台账 |
 | `test/unit/adapter.mjs` | 渠道指纹改写、请求体组装、路由顺序、排队错误映射 |
 
-抓取通用要点：令牌从 `$DSH_HOME/.credentials.yaml` 的 `WORKBUDDY_CN_TOKEN` / `WORKBUDDY_INTL_TOKEN` 读；插件令牌用 `/v2/...` 路径，Web cookie 会话用不带 `/v2` 的路径。
+抓取通用要点：令牌从 `$DSH_HOME/dsh-workbuddy/credentials.json` 的 `WORKBUDDY_CN_TOKEN` / `WORKBUDDY_INTL_TOKEN` 读（插件自己的文档，`0.3.0` 起不再用宿主的 `.credentials.yaml`）；插件令牌用 `/v2/...` 路径，Web cookie 会话用不带 `/v2` 的路径。
 
 **定位前端字段来源的套路**（本次就是这样找到 `/v2/chat/busy` 的）：
 
