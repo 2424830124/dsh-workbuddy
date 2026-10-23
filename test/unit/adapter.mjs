@@ -255,6 +255,18 @@ assert.match(window.message, /换用其它模型/)
 assert.notEqual(quota.code, 'RATE_LIMIT')
 assert.notEqual(window.code, 'RATE_LIMIT')
 
+// The mainland deployment says the same thing in Chinese, with business code 6004
+// (measured 2026-10-24). Matching only the English wording left this falling through to a
+// bare `HTTP_429` whose explanation was a wall of raw JSON.
+const mainland = await exhausted(429, JSON.stringify({
+  code: 6004,
+  msg: '您的使用量已超出频率限制，将在 2026-10-24 09:54:53 UTC+8 重置，您也可以切换其他模型继续使用。',
+  requestId: 'x'
+}), 'QUOTA')
+assert.match(mainland.message, /频率超限/)
+assert.match(mainland.message, /2026-10-24 09:54:53 UTC\+8/, 'the reset time survives, timezone included')
+assert.match(mainland.message, /换用其它模型/, 'and the suggestion is recognised in Chinese too')
+
 // ---------------------------------------------------------------------------
 // How a stream ends decides whether a short answer is retried or silently kept.
 //

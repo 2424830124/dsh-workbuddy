@@ -186,16 +186,23 @@ function requestFailure(provider, status, body) {
   }
   // Balance exhausted: the message is worth passing through verbatim, because it names the
   // page where credits are bought. Not retryable — an empty balance stays empty.
-  if (/14018|credits exhausted|insufficient|balance/i.test(body)) {
+  if (/14018|credits exhausted|insufficient_quota/i.test(body)) {
     return llmError(`${provider}: 积分已用尽，请到上游充值后再试（不是插件或网络问题）；上游原文：${errorDetail(body).slice(0, 200)}`, 'QUOTA', { status })
   }
   // The account's rate window is used up until a stated time. Not retryable: the reset is
   // hours away, not backoff-length away.
-  if (status === 429 || /exceeds frequency limit|usage exceeds/i.test(body)) {
-    const reset = /reset at ([0-9T:.+\-Z ]+)/i.exec(body)?.[1]?.trim()
+  //
+  // The mainland deployment says it in Chinese (`6004 您的使用量已超出频率限制，将在 <时间>
+  // 重置`), the overseas one in English; matching only one language left the other falling
+  // through to a bare `HTTP_429` with raw JSON as the explanation. The code is matched too,
+  // because a body can be trimmed by the gateway before the wording arrives.
+  if (status === 429 || /6004|exceeds frequency limit|usage exceeds|超出频率限制|频率限制/i.test(body)) {
+    // The reset time is written "2026-10-24 09:54:53 UTC+8" on both deployments.
+    const reset = /((?:19|20)\d\d-\d\d-\d\d[ T]\d\d:\d\d:\d\d(?: ?(?:UTC|GMT)?[+-]\d{1,2}(?::?00)?)?)/.exec(body)?.[1]?.trim()
+      ?? /reset at ([0-9T:.+\-Z ]+)/i.exec(body)?.[1]?.trim()
     const parts = [`${provider}: 用量频率超限（账号配额，不是插件或网络问题）`]
     if (reset !== undefined && reset.length > 0) parts.push(`额度将于 ${reset} 重置`)
-    if (/switch to the other models?/i.test(body)) parts.push('期间可以换用其它模型')
+    if (/switch to the other models?|切换其他模型/i.test(body)) parts.push('期间可以换用其它模型')
     parts.push(`上游原文：${errorDetail(body).slice(0, 200)}`)
     return llmError(parts.join('；'), 'QUOTA', { status })
   }
