@@ -30,14 +30,12 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { entryFromMeta, isAdvertisableId } from './catalog.js'
+import { ensurePluginDir } from './paths.js'
 
 const LIST_VERSION = 1
 
 function listDir() {
-  const home = typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME.length > 0
-    ? process.env.DSH_HOME
-    : join(homedir(), '.dsh')
-  return join(home, 'cache', 'dsh-workbuddy')
+  return ensurePluginDir()
 }
 
 function listPath(regionId) {

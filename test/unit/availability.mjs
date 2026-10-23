@@ -29,9 +29,14 @@ globalThis.fetch = async (url, init) => {
     text: async () => '{"code":11133,"msg":"the request parameters were rejected by the model provider"}'
   }
 }
+// Credentials come from the plugin's own document now (src/paths.js).
+const { setCredential } = await import('../../src/paths.js')
+setCredential(REGIONS.cn.tokenRef, `token-for-${REGIONS.cn.tokenRef}`)
+setCredential(REGIONS.intl.tokenRef, `token-for-${REGIONS.intl.tokenRef}`)
+
 const probeCtx = {
   logger: { info: () => {}, warn: () => {}, error: () => {} },
-  credentials: { resolve: async (ref) => ({ value: `token-for-${ref}` }) }
+  credentials: { resolve: async () => undefined }
 }
 await probeModel(probeCtx, REGIONS.cn, 'hy3')
 await probeModel(probeCtx, REGIONS.intl, 'hy3')

@@ -31,6 +31,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { isCatalogModelId, keepModel, withConsistentEfforts } from './catalog.js'
+import { ensurePluginDir } from './paths.js'
 
 const CACHE_VERSION = 1
 /** Modality order used across the catalog entries. */
@@ -56,10 +57,7 @@ const MODALITY_ORDER = ['text', 'image']
 const VOLATILE_FIELDS = new Set(['credits', 'promotion', 'canDisableThinking'])
 
 function cacheDir() {
-  const home = typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME.length > 0
-    ? process.env.DSH_HOME
-    : join(homedir(), '.dsh')
-  return join(home, 'cache', 'dsh-workbuddy')
+  return ensurePluginDir()
 }
 
 function cachePath(regionId) {

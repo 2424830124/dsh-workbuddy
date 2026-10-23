@@ -24,6 +24,8 @@ import {
   tokenExpiryMs,
   tokenNickname
 } from './http.js'
+import { resolveCredential, setCredential, unsetCredential } from './paths.js'
+import { clearLoggedOut, markLoggedOut } from './model-prefs.js'
 import { REGION_IDS, REGIONS, openInBrowser } from './regions.js'
 
 const LOGIN_TIMEOUT_MS = 5 * 60_000
@@ -73,9 +75,13 @@ export function bumpAuthGeneration(region) {
  */
 export async function logoutRegion(ctx, region) {
   bumpAuthGeneration(region)
-  await ctx.credentials.unset(region.tokenRef)
-  await ctx.credentials.unset(region.metaRef)
-  ctx.logger.info(`[workbuddy] ${region.id}: 已退出登录，凭据已删除`)
+  unsetCredential(region.tokenRef)
+  unsetCredential(region.metaRef)
+  // Hiding the models is part of logging out: the picker kept offering them because the
+  // cached catalog and the hand decisions were still there, so a logged-out deployment
+  // looked callable. The marker is cleared by `clearLoggedOut` on the next login.
+  markLoggedOut(region.id)
+  ctx.logger.info(`[workbuddy] ${region.id}: 已退出登录，凭据已删除，模型已从选择器移除`)
 }
 
 function authHeaders(region, extra = {}) {
@@ -163,8 +169,8 @@ async function storeCredential(ctx, region, token, account) {
   const expiresAt = token.expiresIn > 0 ? now + token.expiresIn * 1000 : tokenExpiryMs(token.accessToken) ?? 0
   const refreshExpiresAt = token.refreshExpiresIn > 0 ? now + token.refreshExpiresIn * 1000 : 0
   const nickname = account.nickname.length > 0 ? account.nickname : tokenNickname(token.accessToken)
-  await ctx.credentials.set(region.tokenRef, token.accessToken)
-  await ctx.credentials.set(region.metaRef, JSON.stringify({
+  setCredential(region.tokenRef, token.accessToken)
+  setCredential(region.metaRef, JSON.stringify({
     refreshToken: token.refreshToken,
     expiresAt,
     refreshExpiresAt,
@@ -175,12 +181,15 @@ async function storeCredential(ctx, region, token, account) {
     accountType: account.accountType,
     updatedAt: now
   }))
+  // A successful login makes the deployment offerable again; without this the picker would
+  // stay empty from the last logout.
+  clearLoggedOut(region.id)
   return { nickname, expiresAt, refreshable: token.refreshToken.length > 0 }
 }
 
 export async function readMeta(ctx, region) {
   try {
-    const resolved = await ctx.credentials.resolve(region.metaRef)
+    const resolved = resolveCredential(region.metaRef)
     if (resolved === undefined || resolved.value.length === 0) return undefined
     const parsed = JSON.parse(resolved.value)
     return typeof parsed === 'object' && parsed !== null ? parsed : undefined
@@ -191,7 +200,7 @@ export async function readMeta(ctx, region) {
 
 export async function readToken(ctx, region) {
   try {
-    const resolved = await ctx.credentials.resolve(region.tokenRef)
+    const resolved = resolveCredential(region.tokenRef)
     return resolved === undefined || resolved.value.length === 0 ? '' : resolved.value
   } catch {
     return ''
@@ -240,8 +249,8 @@ export async function refreshRegion(ctx, region, options = {}) {
   const nextRefresh = readString(data, 'refreshToken')
   const expiresIn = typeof data.expiresIn === 'number' ? data.expiresIn : 0
   const refreshExpiresIn = typeof data.refreshExpiresIn === 'number' ? data.refreshExpiresIn : 0
-  await ctx.credentials.set(region.tokenRef, nextAccess)
-  await ctx.credentials.set(region.metaRef, JSON.stringify({
+  setCredential(region.tokenRef, nextAccess)
+  setCredential(region.metaRef, JSON.stringify({
     ...meta,
     refreshToken: nextRefresh.length > 0 ? nextRefresh : meta.refreshToken,
     expiresAt: expiresIn > 0 ? now + expiresIn * 1000 : tokenExpiryMs(nextAccess) ?? 0,

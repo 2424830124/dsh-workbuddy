@@ -94,7 +94,7 @@ assert.equal(updated.descriptionZh, '混元思考模型，具有增强的推理�
 assert.ok(updated.lastSeen >= updated.firstSeen)
 
 // The replaced snapshot is kept beside it for inspection.
-assert.ok(existsSync(join(process.env.DSH_HOME, 'cache', 'dsh-workbuddy', 'catalog-cn.prev.json')), 'the replaced snapshot is kept as .prev')
+assert.ok(existsSync(join(process.env.DSH_HOME, 'dsh-workbuddy', 'catalog-cn.prev.json')), 'the replaced snapshot is kept as .prev')
 
 // A different deployment has its own file.
 assert.equal(readCatalogCache('intl'), undefined)

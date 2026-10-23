@@ -21,6 +21,11 @@ const { REGIONS } = await import('../../src/regions.js')
 
 const BLOCKED = 'You are an AI agent powered by DeepSeek Harness.\n\nYou are a coding agent powered by the hy3 model. Instructions follow.'
 
+// Tokens come from the plugin's own document (src/paths.js), so the fixture seeds it.
+const { setCredential } = await import('../../src/paths.js')
+setCredential(REGIONS.cn.tokenRef, 'header.payload.signature')
+setCredential(REGIONS.intl.tokenRef, 'header.payload.signature')
+
 const ctx = {
   logger: { info: () => {}, warn: () => {}, error: () => {} },
   credentials: { resolve: async () => undefined },

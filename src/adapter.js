@@ -692,8 +692,13 @@ export class WorkBuddyAdapter {
         if (attempt.finish !== undefined) yield attempt.finish
         return
       }
-      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} ${attempt.reason}，自动续写一次`)
-      messages = [...options.messages, ...continuationMessages(attempt)]
+      // `attempt.note` is the summary's description of why this round needs continuing;
+      // `attempt.reason` never existed and printed "undefined" in the log.
+      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} ${attempt.note}，自动续写一次`)
+      // Built from the *current* messages, not the original ones: with RECOVERY_ROUNDS
+      // above 1 this would otherwise drop the previous continuation and repeat the same
+      // draft forever.
+      messages = [...messages, ...continuationMessages(attempt)]
       offset = attempt.maxIndex + 1
     }
   }

@@ -21,13 +21,12 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
+import { ensurePluginDir } from './paths.js'
+
 const PREFS_VERSION = 1
 
 function prefsDir() {
-  const home = typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME.length > 0
-    ? process.env.DSH_HOME
-    : join(homedir(), '.dsh')
-  return join(home, 'cache', 'dsh-workbuddy')
+  return ensurePluginDir()
 }
 
 function prefsPath(regionId) {
@@ -36,18 +35,19 @@ function prefsPath(regionId) {
 
 const idSet = (value) => new Set(Array.isArray(value) ? value.filter((id) => typeof id === 'string' && id.length > 0) : [])
 
-/** @returns {{ on: Set<string>, off: Set<string>, updatedAt: number }} */
+/** @returns {{ on: Set<string>, off: Set<string>, loggedOut: boolean, updatedAt: number }} */
 export function readPrefs(regionId) {
   try {
     const parsed = JSON.parse(readFileSync(prefsPath(regionId), 'utf8'))
-    if (parsed?.version !== PREFS_VERSION) return { on: new Set(), off: new Set(), updatedAt: 0 }
+    if (parsed?.version !== PREFS_VERSION) return { on: new Set(), off: new Set(), loggedOut: false, updatedAt: 0 }
     return {
       on: idSet(parsed.on),
       off: idSet(parsed.off),
+      loggedOut: parsed.loggedOut === true,
       updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : 0
     }
   } catch {
-    return { on: new Set(), off: new Set(), updatedAt: 0 }
+    return { on: new Set(), off: new Set(), loggedOut: false, updatedAt: 0 }
   }
 }
 
@@ -59,6 +59,7 @@ function write(regionId, prefs) {
     writeFileSync(staging, JSON.stringify({
       version: PREFS_VERSION,
       updatedAt: Date.now(),
+      ...(prefs.loggedOut === true ? { loggedOut: true } : {}),
       on: [...prefs.on].sort(),
       off: [...prefs.off].sort()
     }))
@@ -72,14 +73,37 @@ function write(regionId, prefs) {
 /**
  * Whether a model is offered, given the hand decisions and its verdict.
  *
- * @param {{ on: Set<string>, off: Set<string> }} prefs
+ * A region that is logged out offers nothing: the picker must not keep advertising models
+ * the account can no longer call, and with no credentials the verdicts are meaningless
+ * anyway. `readPrefs` reports that state, and this is the single place it is honoured.
+ *
+ * @param {{ on: Set<string>, off: Set<string>, loggedOut?: boolean }} prefs
  * @param {string} id
  * @param {boolean} unusable whether the availability ledger marked it dead
  */
 export function isEnabled(prefs, id, unusable) {
+  if (prefs.loggedOut === true) return false
   if (prefs.on.has(id)) return true
   if (prefs.off.has(id)) return false
   return !unusable
+}
+
+/**
+ * Mark the region as logged out, which hides every model from the picker until a login
+ * clears it. Not the same as disabling each id: that would be a pile of hand decisions the
+ * user never made, and would survive the next login.
+ */
+export function markLoggedOut(regionId) {
+  const prefs = readPrefs(regionId)
+  if (prefs.loggedOut === true) return { saved: true, alreadyOut: true }
+  return { saved: write(regionId, { ...prefs, loggedOut: true, on: new Set(), off: new Set() }) }
+}
+
+/** Clear the logged-out marker; called when a login succeeds. */
+export function clearLoggedOut(regionId) {
+  const prefs = readPrefs(regionId)
+  if (prefs.loggedOut !== true) return { saved: true }
+  return { saved: write(regionId, { ...prefs, loggedOut: false }) }
 }
 
 /**

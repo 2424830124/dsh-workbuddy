@@ -21,7 +21,13 @@ rmSync(process.env.DSH_HOME, { recursive: true, force: true })
 const { registerWorkbuddyApi } = await import('../../src/api.js')
 
 const routes = []
-const store = new Map()
+// The plugin owns its credentials now: they live in $DSH_HOME/dsh-workbuddy/credentials.json.
+const { setCredential, unsetCredential } = await import('../../src/paths.js')
+const store = {
+  set: (ref, value) => setCredential(ref, value),
+  unset: (ref) => unsetCredential(ref),
+  has: () => false
+}
 let rejection
 
 const json = (payload, status = 200) => new Response(JSON.stringify(payload), {
@@ -81,10 +87,12 @@ const topologyNotices = []
 
 const ctx = {
   logger: { info: () => {}, warn: () => {}, error: () => {} },
+  // Kept on the surface because the routes still receive the context; the plugin reads
+  // its own document instead (src/paths.js).
   credentials: {
-    resolve: async (ref) => (store.has(ref) ? { value: store.get(ref) } : undefined),
-    set: async (ref, value) => { store.set(ref, value) },
-    unset: async (ref) => { store.delete(ref) }
+    resolve: async () => undefined,
+    set: async () => {},
+    unset: async () => {}
   },
   // The client's model directory only re-reads the catalog when the host says
   // the model set changed, so every mutating route must reach this hook.

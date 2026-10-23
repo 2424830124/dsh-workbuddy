@@ -19,23 +19,15 @@ const { authGeneration, bumpAuthGeneration, logoutRegion, refreshRegion, beginLo
 
 const region = REGIONS.intl
 
-/** A credentials store with the same surface the plugin uses. */
+/** The plugin's own credential document, behind the same little surface the tests use. */
+const { readCredential, setCredential, unsetCredential } = await import('../../src/paths.js')
+
 const createStore = (initial = {}) => {
-  const values = new Map(Object.entries(initial))
-  return {
-    values,
-    async resolve(ref) {
-      const value = values.get(ref)
-      return value === undefined ? undefined : { value, source: 'stored', writable: true }
-    },
-    async set(ref, value) {
-      if (value.length === 0) throw new Error('empty value')
-      values.set(ref, value)
-    },
-    async unset(ref) {
-      values.delete(ref)
-    }
+  for (const [ref, value] of Object.entries(initial)) setCredential(ref, value)
+  const values = {
+    has: (ref) => readCredential(ref).length > 0
   }
+  return { values }
 }
 
 const createCtx = (store, logs = []) => ({

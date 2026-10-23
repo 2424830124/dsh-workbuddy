@@ -21,6 +21,7 @@
 import { readMeta, readToken } from './auth.js'
 import { localDayKey, requestJson, responseCode, responseMessage } from './http.js'
 import { REGIONS } from './regions.js'
+import { setCredential } from './paths.js'
 
 const USER_RESOURCE_PATH = '/v2/billing/meter/get-user-resource'
 const CHECKIN_STATUS_PATH = '/v2/billing/meter/checkin-status'
@@ -193,7 +194,7 @@ async function rememberClaim(ctx, region, outcome) {
   try {
     const meta = await readMeta(ctx, region)
     if (meta === undefined) return
-    await ctx.credentials.set(region.metaRef, JSON.stringify({
+    setCredential(region.metaRef, JSON.stringify({
       ...meta,
       checkin: { day: localDayKey(), at: Date.now(), ...outcome }
     }))

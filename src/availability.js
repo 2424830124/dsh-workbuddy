@@ -34,6 +34,7 @@ import { join } from 'node:path'
 
 import { accountIdOf, readToken } from './auth.js'
 import { chatRoutes } from './regions.js'
+import { ensurePluginDir } from './paths.js'
 
 const LEDGER_VERSION = 1
 /** How long a probe verdict is trusted before the model is swept again. */
@@ -45,10 +46,7 @@ const PROBE_TIMEOUT_MS = 30_000
 const UNUSABLE_STATES = new Set(['dead', 'denied'])
 
 function ledgerDir() {
-  const home = typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME.length > 0
-    ? process.env.DSH_HOME
-    : join(homedir(), '.dsh')
-  return join(home, 'cache', 'dsh-workbuddy')
+  return ensurePluginDir()
 }
 
 function ledgerPath(regionId) {

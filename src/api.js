@@ -23,6 +23,7 @@ import { isEnabled, readPrefs, setEnabled } from './model-prefs.js'
 import { readOfficialList, writeOfficialList } from './official-list.js'
 import { REGIONS, REGION_IDS, sitePageUrl } from './regions.js'
 import { notifyModelTopology } from './topology.js'
+import { setCredential } from './paths.js'
 
 const API_PREFIX = '/workbuddy'
 const MAX_BODY_BYTES = 16 * 1024
@@ -518,7 +519,7 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
         const outcome = await claimDailyCheckin(ctx, region)
         const meta = await readMeta(ctx, region)
         if (meta !== undefined) {
-          await ctx.credentials.set(region.metaRef, JSON.stringify({
+          setCredential(region.metaRef, JSON.stringify({
             ...meta,
             checkin: { day: localDayKey(), at: Date.now(), reason: '手动', ...outcome }
           }))
