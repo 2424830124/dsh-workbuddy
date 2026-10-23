@@ -25,7 +25,9 @@ src/
   official-list.js  账号名单导入（id 或记录，字段级富化，不含倍率）
   busy.js           /v2/chat/busy 的繁忙程度（仅大陆版）
   credits.js        积分、签到、启动/午夜自动领取
-  adapter.js        llm 适配器（请求组装、SSE、路由回退、提示词改写）
+  wire.js           Harness 消息 → OpenAI wire 消息（工具结果角色、配对、图片）
+  sse.js            SSE 分帧（bytes → data payload、[DONE]、取消响应体）
+  adapter.js        llm 适配器（请求组装、分片组装、结束分类、续写、路由回退、提示词改写）
   api.js            面板用的宿主路由 /workbuddy/*
   index.js          apply()：provider 路由、命令、定时器
 client/index.js     设置面板（`settings.section` 槽位的客户端半边）

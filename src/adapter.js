@@ -26,6 +26,7 @@ import { readCatalogCache, writeCatalogCache } from './catalog-cache.js'
 import { readPrefs, isEnabled } from './model-prefs.js'
 import { applyOfficialList, readOfficialList } from './official-list.js'
 import { chatRoutes } from './regions.js'
+import { SSE_DONE, readSse } from './sse.js'
 import { notifyModelTopology } from './topology.js'
 
 const CATALOG_TTL_MS = 10 * 60_000
@@ -811,17 +812,13 @@ export class WorkBuddyAdapter {
     const toolCalls = new Map()
     const toolOrder = []
     const toolIds = new Map()
-    let buffer = ''
     let streamEnded = false
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
     // Evidence for the "the stream was cut" report below: how much arrived, how
     // long it took, how long the silence before the cut was, and what was being
     // written when it happened. The remote's own reason is not observable, so the
-    // report has to carry what *is*.
+    // report has to carry what *is*. `readSse` updates the byte and time fields.
     const startedAt = Date.now()
-    let receivedBytes = 0
-    let lastDataAt = startedAt
+    const state = { receivedBytes: 0, lastDataAt: startedAt }
     let lastDelta = '无内容'
     /** Output tokens the last usage frame reported, for the truncation log. */
     let outputTokens
@@ -869,22 +866,12 @@ export class WorkBuddyAdapter {
     }
 
     try {
-      while (!streamEnded) {
-        const result = await reader.read()
-        if (result.done) break
-        receivedBytes += result.value?.byteLength ?? 0
-        lastDataAt = Date.now()
-        buffer += decoder.decode(result.value, { stream: true })
-        let newline
-        while ((newline = buffer.indexOf('\n')) !== -1) {
-          const line = buffer.slice(0, newline).trim()
-          buffer = buffer.slice(newline + 1)
-          if (!line.startsWith('data:')) continue
-          const payload = line.slice(5).trim()
-          if (payload === '[DONE]') {
-            streamEnded = true
-            break
-          }
+      for await (const payload of readSse(response, state)) {
+        if (payload === SSE_DONE) {
+          streamEnded = true
+          break
+        }
+        {
           let data
           try {
             data = JSON.parse(payload)
@@ -958,12 +945,12 @@ export class WorkBuddyAdapter {
         }
       }
     } catch (error) {
-      // `reader.read()` throws on a real socket failure (undici reports
+      // The generator surfaces real socket failures (undici reports
       // `TypeError: terminated`). Left alone the harness classifies that as UNKNOWN and
       // does not retry, so a connection reset mid-answer would fail instead of
       // recovering. A user abort is different and is rethrown untouched.
       if (options.signal?.aborted === true) throw error
-      const detail = describeCut({ receivedBytes, startedAt, lastDataAt, lastDelta })
+      const detail = describeCut({ receivedBytes: state.receivedBytes, startedAt, lastDataAt: state.lastDataAt, lastDelta })
       this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的响应在网络层中断（${detail}；${error instanceof Error ? error.message : String(error)}），按传输错误上报，可自动重试`)
       yield finishChunk({
         kind: 'error',
@@ -973,11 +960,6 @@ export class WorkBuddyAdapter {
         }
       })
       return
-    } finally {
-      // Cancel before releasing: when the loop stopped at `[DONE]` the rest of the body
-      // was never read, and releasing the lock alone leaves that connection open.
-      await reader.cancel().catch(() => undefined)
-      reader.releaseLock()
     }
 
     let blockCount = 0
@@ -1039,7 +1021,7 @@ export class WorkBuddyAdapter {
     // the retry policy never sees a failure. It has to be an error so a truncated
     // answer is retried and, failing that, surfaced.
     if (!streamEnded && finishReason === undefined) {
-      const detail = describeCut({ receivedBytes, startedAt, lastDataAt, lastDelta })
+      const detail = describeCut({ receivedBytes: state.receivedBytes, startedAt, lastDataAt: state.lastDataAt, lastDelta })
       this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的响应在 finish_reason/[DONE] 之前中断（${detail}），按传输错误上报，可自动重试`)
       yield finishChunk({
         kind: 'error',
@@ -1051,7 +1033,7 @@ export class WorkBuddyAdapter {
       return
     }
     if (argsTruncated && !streamEnded) {
-      const detail = describeCut({ receivedBytes, startedAt, lastDataAt, lastDelta })
+      const detail = describeCut({ receivedBytes: state.receivedBytes, startedAt, lastDataAt: state.lastDataAt, lastDelta })
       this.ctx.logger.warn(`[workbuddy] ${this.region.id}: ${options.model} 的工具调用参数在传输中被截断（${detail}），按传输错误上报，可自动重试`)
       yield finishChunk({
         kind: 'error',
