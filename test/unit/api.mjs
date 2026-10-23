@@ -302,4 +302,16 @@ await route.handler({
 assert.equal(JSON.parse(closedRes.body).opened, true, 'the first registration keeps its opener')
 void noBrowserRoutes
 
-console.log('api.mjs: OK — routes, validation, trust fence, credits, check-in, state payload, and topology notices verified')
+// The artwork is served by the same route table. A stale relative path here fails only at
+// request time, which is how it reached a release once — so it is asserted: both files must
+// resolve from wherever this module now lives.
+const iconRes = makeRes()
+await route.handler({ method: 'GET', url: '/workbuddy/icon', headers: {} }, iconRes)
+assert.equal(iconRes.statusCode, 200, 'the panel icon is served')
+assert.ok((iconRes.body?.length ?? 0) > 0, 'and it is not empty')
+
+const maskRes = makeRes()
+await route.handler({ method: 'GET', url: '/workbuddy/icon-mask', headers: {} }, maskRes)
+assert.equal(maskRes.statusCode, 200, 'the alpha mask is served too')
+
+console.log('api.mjs: OK — routes, validation, trust fence, credits, check-in, state payload, topology notices, and the artwork verified')

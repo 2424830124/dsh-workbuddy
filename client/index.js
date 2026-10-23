@@ -99,6 +99,7 @@ window.__ModuleLoader__.load({
         noMatch: (query) => `没有匹配「${query}」的模型`,
         stateDead: '不可用',
         stateDenied: '无权限',
+        stateAuth: '凭据失效',
         stateUnknown: '未知',
         detailId: '标识',
         detailContext: '上下文',
@@ -184,6 +185,7 @@ window.__ModuleLoader__.load({
         noMatch: (query) => `No model matches “${query}”`,
         stateDead: 'unusable',
         stateDenied: 'no permission',
+        stateAuth: 'credentials rejected',
         stateUnknown: 'unknown',
         detailId: 'ID',
         detailContext: 'Context',
@@ -587,15 +589,17 @@ window.__ModuleLoader__.load({
       dead: 'stateDead',
       denied: 'stateDenied',
       blocked: 'stateDenied',
+      // A rejected credential is a definite answer, not an unknown one: every model
+      // reported it, and the fix is a re-login rather than a retry.
+      auth: 'stateAuth',
       down: 'stateUnknown',
-      error: 'stateUnknown',
-      auth: 'stateUnknown'
+      error: 'stateUnknown'
     }
     const availabilityChip = (entry, t) => {
       const key = entry === null || entry === undefined ? undefined : AVAILABILITY_LABEL[entry.state]
       if (key === undefined) return null
       const tone = entry.state === 'dead' ? 'wb-tag-bad'
-        : ((entry.state === 'denied' || entry.state === 'blocked') ? 'wb-tag-warn' : '')
+        : ((entry.state === 'denied' || entry.state === 'blocked' || entry.state === 'auth') ? 'wb-tag-warn' : '')
       return tag(t(key), tone, { key: 'state', title: availabilityTitle(entry, t) })
     }
 
@@ -603,7 +607,7 @@ window.__ModuleLoader__.load({
     const availabilityColor = (entry) => {
       if (entry === null || entry === undefined) return 'var(--wb-line)'
       if (entry.state === 'dead') return 'var(--dsw-alias-state-error-primary, #e5484d)'
-      if (entry.state === 'denied' || entry.state === 'blocked' || entry.state === 'busy') {
+      if (entry.state === 'denied' || entry.state === 'blocked' || entry.state === 'busy' || entry.state === 'auth') {
         return 'var(--dsw-alias-state-warn-primary, #d89614)'
       }
       if (entry.state === 'ok') return 'var(--dsw-alias-state-success-primary, #3fa45b)'
@@ -835,9 +839,11 @@ window.__ModuleLoader__.load({
        * dead), so the rows are re-read afterwards.
        */
       /** Busy levels for one deployment; empty on the side that has no such route. */
-      const refreshBusy = async (regionId) => {
+      const refreshBusy = async (regionId, fresh = false) => {
         try {
-          const result = await request(`/busy?region=${encodeURIComponent(regionId)}`)
+          // `refresh=1` drops the host's 50-second cache. Without it a check right after
+          // the panel opened would re-read the same stale levels.
+          const result = await request(`/busy?region=${encodeURIComponent(regionId)}${fresh ? '&refresh=1' : ''}`)
           setBusyLevels((current) => ({ ...current, [regionId]: result.levels ?? {} }))
         } catch {
           // A missing route is not an error worth showing: the detail row simply
@@ -855,6 +861,10 @@ window.__ModuleLoader__.load({
           setAvailability((current) => ({ ...current, [regionId]: { counts: result.counts ?? {}, total: result.total ?? 0, savedAt: result.savedAt ?? 0 } }))
           const models = await request(`/models?region=${encodeURIComponent(regionId)}`)
           setModelMap((current) => ({ ...current, [regionId]: modelMeta(models) }))
+          // Busy levels are a separate route and were only fetched when the login state
+          // changed, so a check — the moment a user expects fresh numbers — left them on
+          // 未知. They are cheap and cached for 50s on the host, so re-read them here too.
+          await refreshBusy(regionId, manual)
           await load()
         } catch (cause) {
           setError(cause instanceof Error ? cause.message : String(cause))

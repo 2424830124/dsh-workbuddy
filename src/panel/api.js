@@ -27,10 +27,16 @@ import { setCredential } from '../core/paths.js'
 
 const API_PREFIX = '/workbuddy'
 const MAX_BODY_BYTES = 16 * 1024
-/** The same artwork the plugin inventory shows, served to the panel's header. */
-const ICON_PATH = fileURLToPath(new URL('../icon.webp', import.meta.url))
+/**
+ * The same artwork the plugin inventory shows, served to the panel's header.
+ *
+ * Two levels up: this file lives in `src/panel/`, the artwork at the package root. The
+ * relative path was `../icon.webp` before the role folders existed, and a stale one here
+ * fails at request time, not at import time — which is exactly how it reached a release.
+ */
+const ICON_PATH = fileURLToPath(new URL('../../icon.webp', import.meta.url))
 /** The same mark as an alpha-only silhouette, which the panel uses as a CSS mask. */
-const MASK_PATH = fileURLToPath(new URL('../icon-mask.png', import.meta.url))
+const MASK_PATH = fileURLToPath(new URL('../../icon-mask.png', import.meta.url))
 let iconBytes
 let maskBytes
 
