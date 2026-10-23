@@ -186,7 +186,9 @@ export function apply(ctx) {
   const bootTimer = setTimeout(() => {
     ctx.logger.info(`[workbuddy] 启动定时器触发（实例 ${instance}）`)
     for (const id of REGION_IDS) {
-      void refreshRegion(ctx, REGIONS[id]).catch((error) => {
+      // Same reason as the sweep: a token can be retired while the app was closed, and the
+      // claim will still say it is good for weeks.
+      void refreshRegion(ctx, REGIONS[id], { rotate: true }).catch((error) => {
         ctx.logger.warn(`[workbuddy] ${id}: 启动续期失败 — ${error instanceof Error ? error.message : String(error)}`)
       })
     }
@@ -216,9 +218,11 @@ export function apply(ctx) {
   }, REFRESH_BOOT_DELAY_MS)
   bootTimer.unref?.()
 
+  // Rotate on the sweep's own cadence rather than "when the claim says it is close": the
+  // claim is an upper bound the server does not honour (see REFRESH_INTERVAL_MS).
   const sweep = setInterval(() => {
     for (const id of REGION_IDS) {
-      void refreshRegion(ctx, REGIONS[id]).catch(() => {})
+      void refreshRegion(ctx, REGIONS[id], { rotate: true }).catch(() => {})
     }
   }, REFRESH_INTERVAL_MS)
   sweep.unref?.()

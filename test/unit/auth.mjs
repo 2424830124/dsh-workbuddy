@@ -135,4 +135,41 @@ globalThis.fetch = realFetch
 assert.equal(existsSync(join(process.env.DSH_HOME, 'nothing-here')), false)
 void readFileSync
 
-console.log('auth.mjs: OK — logout deletes credentials, and stale work cannot write them back')
+// ---------------------------------------------------------------------------
+// 5) The background sweep rotates even when the claim says the token is good.
+//
+// The mainland deployment retires a session about 21 minutes after issuing it, while the
+// token's `exp` claim is 28 days out (measured 2026-10-23). A sweep that trusted the claim
+// skipped every rotation and left each request in between failing with 401 — reported as
+// "the account keeps expiring". `rotate` means "refresh on my cadence, do not ask the claim".
+// ---------------------------------------------------------------------------
+{
+  const farFuture = Date.now() + 28 * 24 * 3600_000
+  const store = createStore({
+    [region.tokenRef]: 'access-1',
+    [region.metaRef]: JSON.stringify({ refreshToken: 'refresh-1', expiresAt: farFuture })
+  })
+  const ctx = createCtx(store)
+  let refreshCalls = 0
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('auth/token/refresh')) {
+      refreshCalls += 1
+      return new Response(JSON.stringify({ code: 0, data: { accessToken: 'access-2' } }), {
+        status: 200, headers: { 'content-type': 'application/json' }
+      })
+    }
+    return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+
+  const lazy = await refreshRegion(ctx, region)
+  assert.equal(lazy.refreshed, false, 'a lazy refresh still trusts a far-future claim')
+  assert.equal(refreshCalls, 0, 'and does not spend a round trip')
+
+  const rotated = await refreshRegion(ctx, region, { rotate: true })
+  assert.equal(rotated.refreshed, true, 'the sweep rotates despite the claim')
+  assert.equal(refreshCalls, 1)
+  assert.equal(readCredential(region.tokenRef), 'access-2', 'and the new token is stored')
+  globalThis.fetch = realFetch
+}
+
+console.log('auth.mjs: OK — logout deletes credentials, stale work cannot write them back, and the sweep ignores the exp claim')

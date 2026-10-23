@@ -821,12 +821,23 @@ window.__ModuleLoader__.load({
         }
       }
 
-      /** Ask the Host to re-read the catalog (scoped → config → cache). */
+      /**
+       * Ask the Host to re-read the catalog (scoped → config → cache).
+       *
+       * The refresh is the one moment a user asks for current numbers, so it covers all
+       * three live columns: the catalog read brings fresh rates and promotions (they are
+       * deliberately never cached), and the busy levels are a separate route that would
+       * otherwise keep whatever it fetched when the panel opened.
+       */
       const refreshModels = async (regionId) => {
-        setModelMap((current) => ({ ...current, [regionId]: { loading: true } }))
+        // Keep the rows on screen while the new list loads: replacing them with a loading
+        // marker dropped `enabled` to its default, so every switch rendered as on and then
+        // flipped back when the answer arrived.
+        setModelMap((current) => ({ ...current, [regionId]: { ...current[regionId], loading: true } }))
         try {
           const result = await request(`/models?region=${encodeURIComponent(regionId)}&refresh=1`)
           setModelMap((current) => ({ ...current, [regionId]: modelMeta(result) }))
+          await refreshBusy(regionId, true)
           await load()
         } catch (cause) {
           setModelMap((current) => ({ ...current, [regionId]: { error: cause instanceof Error ? cause.message : String(cause) } }))

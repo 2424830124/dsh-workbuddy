@@ -32,8 +32,19 @@ const LOGIN_TIMEOUT_MS = 5 * 60_000
 const POLL_INTERVAL_MS = 1_500
 /** Rotate once the access token is inside this window of expiring. */
 const REFRESH_SKEW_MS = 24 * 3600_000
-/** Background sweep cadence; WorkBuddy tokens live for weeks. */
-export const REFRESH_INTERVAL_MS = 6 * 3600_000
+/**
+ * Background sweep cadence.
+ *
+ * Not "tokens live for weeks": the mainland access token stops being accepted after about
+ * 21 minutes even though its `exp` claim is 28 days out (measured 2026-10-23 — 401s at
+ * 16:22, 16:43 and 17:04, each fixed by one forced refresh). The claim is an upper bound and
+ * the server retires the session well before it, so a 6-hour sweep left every request in
+ * between failing with 401 — which is what "the account keeps expiring" was.
+ *
+ * Below the observed lifetime with margin, so a fresh token is normally in hand before the
+ * old one stops working.
+ */
+export const REFRESH_INTERVAL_MS = 10 * 60_000
 export const REFRESH_BOOT_DELAY_MS = 8_000
 
 const AUTH_STATE_PATH = '/v2/plugin/auth/state'
@@ -218,7 +229,13 @@ export async function refreshRegion(ctx, region, options = {}) {
     return { refreshed: false, reason: '未登录' }
   }
   const expiresAt = typeof meta.expiresAt === 'number' ? meta.expiresAt : 0
-  if (options.force !== true && expiresAt > 0 && expiresAt - Date.now() > REFRESH_SKEW_MS) {
+  // `options.rotate` is what the background sweep passes: it refreshes on its own cadence
+  // and must not consult `expiresAt`, because that value comes from the token's `exp` claim
+  // and the mainland deployment retires the session long before the claim (see
+  // REFRESH_INTERVAL_MS). The claim is still useful for the *lazy* case — a caller that just
+  // wants "make sure this is fresh" and would otherwise skip a pointless round trip.
+  const lazy = options.force !== true && options.rotate !== true
+  if (lazy && expiresAt > 0 && expiresAt - Date.now() > REFRESH_SKEW_MS) {
     return { refreshed: false, reason: '仍然有效' }
   }
   const accessToken = await readToken(ctx, region)
