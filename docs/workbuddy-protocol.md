@@ -938,7 +938,7 @@ provider 与全部 HTTP 路由都没注册，设置面板只剩一个 `HTTP 404`
 | `test/live/cn-prompt-bisect.mjs [模型]` | 完整提示词 vs 去掉某段，快速判断当前规则命中哪一层 |
 | `test/live/cn-prompt-fingerprint.mjs [模型]` | 对完整提示词做段落级二分，直接指出被拦的那一段（规则变了先跑它） |
 | `test/live/cn-fingerprint-sentence.mjs [段号] [模型]` | 段内句子级二分，定位到具体句子 |
-| `test/live/cn-fingerprint-length.mjs [模型]` / `cn-fingerprint-word.mjs` / `cn-fingerprint-count.mjs` | 判定是否按长度 / 单个词 / 出现次数触发 |
+| `test/live/cn-fingerprint-length.mjs [模型]` / `test/live/cn-fingerprint-word.mjs [模型]` / `test/live/cn-fingerprint-count.mjs [模型]` | 判定是否按长度 / 单个词 / 出现次数触发 |
 | `test/live/cn-header-bisect.mjs [模型]` | 逐个去掉请求头与字段，确认拦截是否与头有关 |
 | **会话取证（"回答为什么中断"）** | |
 | `test/live/session-tail-live.mjs [前缀] [步数] [项目过滤]` | 读最新会话的末尾几步；容残帧（`ZSTD_e_flush`），带 `stopReason`/`outputTokens`/正文 |
