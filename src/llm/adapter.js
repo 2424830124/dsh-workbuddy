@@ -186,6 +186,9 @@ function requestFailure(provider, status, body) {
   }
   // Balance exhausted: the message is worth passing through verbatim, because it names the
   // page where credits are bought. Not retryable — an empty balance stays empty.
+  //
+  // `QUOTA` is right here: this *is* an exhausted balance, and the harness's own UI says so
+  // in its own words, which is what a user should see for it.
   if (/14018|credits exhausted|insufficient_quota/i.test(body)) {
     return llmError(`${provider}: 积分已用尽，请到上游充值后再试（不是插件或网络问题）；上游原文：${errorDetail(body).slice(0, 200)}`, 'QUOTA', { status })
   }
@@ -196,6 +199,11 @@ function requestFailure(provider, status, body) {
   // 重置`), the overseas one in English; matching only one language left the other falling
   // through to a bare `HTTP_429` with raw JSON as the explanation. The code is matched too,
   // because a body can be trimmed by the gateway before the wording arrives.
+  //
+  // Its own code, not `QUOTA`: this is a window, not an empty balance, and the chat UI
+  // renders a `QUOTA` failure as its own fixed "当前请求的额度已用尽" — which would tell the
+  // user to buy credits for something that resets by itself. An unlisted code is shown
+  // verbatim and is not in the retryable set, which is exactly what this needs.
   if (status === 429 || /6004|exceeds frequency limit|usage exceeds|超出频率限制|频率限制/i.test(body)) {
     // The reset time is written "2026-10-24 09:54:53 UTC+8" on both deployments.
     const reset = /((?:19|20)\d\d-\d\d-\d\d[ T]\d\d:\d\d:\d\d(?: ?(?:UTC|GMT)?[+-]\d{1,2}(?::?00)?)?)/.exec(body)?.[1]?.trim()
@@ -204,7 +212,7 @@ function requestFailure(provider, status, body) {
     if (reset !== undefined && reset.length > 0) parts.push(`额度将于 ${reset} 重置`)
     if (/switch to the other models?|切换其他模型/i.test(body)) parts.push('期间可以换用其它模型')
     parts.push(`上游原文：${errorDetail(body).slice(0, 200)}`)
-    return llmError(parts.join('；'), 'QUOTA', { status })
+    return llmError(parts.join('；'), 'RATE_WINDOW_EXCEEDED', { status })
   }
   return llmError(`${provider}: ${errorDetail(body)}`, httpErrorCode(status, body), { status })
 }

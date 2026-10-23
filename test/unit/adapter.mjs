@@ -242,11 +242,13 @@ assert.match(quota.message, /积分已用尽/)
 assert.match(quota.message, /充值/)
 assert.match(quota.message, /Credits exhausted/, 'the upstream text stays for reference')
 
-// The free tier's frequency window: same code, and the reset time is carried along.
+// The free tier's frequency window. Deliberately *not* QUOTA: the chat UI renders a QUOTA
+// failure as its own fixed "当前请求的额度已用尽", which would tell the user to buy credits
+// for something that resets by itself. Its own code is shown verbatim and is not retryable.
 const window = await exhausted(429, JSON.stringify({
   code: 429,
   msg: "usage exceeds frequency limit, but don't worry, your usage will reset at 2026-10-24 09:54:53 UTC+8, alternatively, you can switch to the other models to continue using it."
-}), 'QUOTA')
+}), 'RATE_WINDOW_EXCEEDED')
 assert.match(window.message, /频率超限/)
 assert.match(window.message, /2026-10-24 09:54:53/)
 assert.match(window.message, /换用其它模型/)
@@ -254,6 +256,7 @@ assert.match(window.message, /换用其它模型/)
 // Neither is retryable, so neither may be spelled RATE_LIMIT.
 assert.notEqual(quota.code, 'RATE_LIMIT')
 assert.notEqual(window.code, 'RATE_LIMIT')
+assert.notEqual(window.code, 'QUOTA', 'a window is not an empty balance')
 
 // The mainland deployment says the same thing in Chinese, with business code 6004
 // (measured 2026-10-24). Matching only the English wording left this falling through to a
@@ -262,7 +265,7 @@ const mainland = await exhausted(429, JSON.stringify({
   code: 6004,
   msg: '您的使用量已超出频率限制，将在 2026-10-24 09:54:53 UTC+8 重置，您也可以切换其他模型继续使用。',
   requestId: 'x'
-}), 'QUOTA')
+}), 'RATE_WINDOW_EXCEEDED')
 assert.match(mainland.message, /频率超限/)
 assert.match(mainland.message, /2026-10-24 09:54:53 UTC\+8/, 'the reset time survives, timezone included')
 assert.match(mainland.message, /换用其它模型/, 'and the suggestion is recognised in Chinese too')
