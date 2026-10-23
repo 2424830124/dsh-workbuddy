@@ -294,6 +294,14 @@ export function withConsistentEfforts(entry, candidates = []) {
  * fields the primary source left empty are taken, so scoped stays authoritative
  * for what it does declare.
  */
+/** The first argument that is a non-empty string, or undefined. */
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim().length > 0) return value
+  }
+  return undefined
+}
+
 export function mergeEntries(entries, extra) {
   if (extra.length === 0) return entries
   const byId = new Map(extra.map((entry) => [entry.id, entry]))
@@ -304,6 +312,11 @@ export function mergeEntries(entries, extra) {
       .sort(byEffortOrder)
     const merged = {
       ...entry,
+      // A name is required by the harness (`listModels` rejects the whole provider with
+      // INVALID_CATALOG on an empty one), and the two sources disagree on which models
+      // carry one. Take the non-empty side, and fall back to the id so a sparse record
+      // can never blank out a catalog.
+      name: firstNonEmpty(entry.name, other.name, entry.id),
       ...(entry.descriptionZh === undefined && other.descriptionZh !== undefined ? { descriptionZh: other.descriptionZh } : {}),
       ...(entry.descriptionEn === undefined && other.descriptionEn !== undefined ? { descriptionEn: other.descriptionEn } : {}),
       ...(entry.credits === undefined && other.credits !== undefined ? { credits: other.credits } : {}),

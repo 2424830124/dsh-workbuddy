@@ -78,15 +78,20 @@ function readFile(path) {
     if (typeof parsed.savedAt !== 'number' || !Number.isFinite(parsed.savedAt)) return undefined
     return {
       // Volatile fields are dropped on read too: a snapshot written before they
-      // were excluded must not leak a stale rate either. The admission policy
-      // is applied as well — the cache appends, so an id excluded later has to
-      // be filtered when reading. Because `credits` is never cached, the policy
-      // reduces to "whitelisted" for cached entries, which is exactly the part
-      // of the list that does not depend on a live rate.
+      // were excluded must not leak a stale rate either. The admission policy is
+      // applied as well — the cache appends, so an id excluded later has to be
+      // filtered when reading.
+      //
+      // It is the *structural* half of the policy, not `keepModel`: that one also
+      // demands a live credits rate, and rates are never cached. Applying it here
+      // filtered out every entry a `/v3/config` read had produced, so the fallback
+      // only worked for ids the account-scoped payload had touched too. What a cached
+      // entry proves is that the deployment lists it — which is exactly what the cache
+      // is for.
       entries: parsed.entries
         .filter((entry) => isCatalogModelId(entry?.id))
         .map((entry) => Object.fromEntries(Object.entries(entry).filter(([key]) => !VOLATILE_FIELDS.has(key))))
-        .filter(keepModel),
+        .filter((entry) => entry.preset !== true),
       source: typeof parsed.source === 'string' ? parsed.source : 'unknown',
       savedAt: parsed.savedAt,
       /** How many models the read behind this snapshot actually returned. */

@@ -102,9 +102,10 @@ writeCatalogCache('intl', 'config', [{ id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', o
 assert.equal(readCatalogCache('intl').entries.length, 1)
 assert.equal(readCatalogCache('cn').entries.length, 2, 'deployments do not share a cache')
 
-// The admission policy is applied on read: aliases, presets, and non-whitelisted
-// models with no rate are dropped — a cached entry has no rate by construction,
-// so in practice the cached list is the whitelist.
+// The admission policy applied on read is the *structural* half: aliases and presets
+// go, everything the deployment listed stays. It must not require a live rate, because
+// rates are never cached — doing that emptied the cache for `/v3/config` reads, which
+// is the only source the international deployment has when the scoped endpoint is down.
 writeCatalogCache('cn', 'scoped', [
   { id: 'auto', name: 'Auto', preset: true },
   { id: 'fast-model', name: 'Fast', preset: true, official: false },
@@ -112,9 +113,17 @@ writeCatalogCache('cn', 'scoped', [
   { id: 'hy4-preview', name: 'Hy4 preview', preset: false, official: true }
 ])
 const filtered = readCatalogCache('cn')
-assert.deepEqual(filtered.entries.map((entry) => entry.id).sort(), ['glm-5.3', 'hy3', 'hy4-preview'])
+assert.deepEqual(filtered.entries.map((entry) => entry.id).sort(), ['glm-5.0', 'glm-5.3', 'hy3', 'hy4-preview'])
 assert.ok(!filtered.entries.some((entry) => entry.id === 'auto'), 'the alias is filtered on read')
-assert.ok(!filtered.entries.some((entry) => entry.id === 'glm-5.0'), 'a non-whitelisted model without a cached rate is filtered')
+assert.ok(!filtered.entries.some((entry) => entry.id === 'fast-model'), 'a preset is filtered on read')
+assert.ok(filtered.entries.some((entry) => entry.id === 'glm-5.0'), 'a listed model survives without a cached rate')
 assert.ok(filtered.entries.some((entry) => entry.id === 'hy4-preview'), 'a whitelisted model survives without a rate')
 
-console.log('catalog-cache.mjs: OK — append, metadata preservation, per-deployment files, and read-time policy filtering verified')
+// A `/v3/config`-only entry (no `official`, no rate — the international fallback case)
+// must survive the round trip, otherwise the cache is useless when both sources fail.
+writeCatalogCache('intl-fallback', 'config', [{ id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', input: ['text'], maxTokens: 200000 }])
+const fallback = readCatalogCache('intl-fallback')
+assert.equal(fallback.entries.length, 1, 'a config-only entry survives the cache round trip')
+assert.equal(fallback.entries[0].credits, undefined, 'and still carries no stale rate')
+
+console.log('catalog-cache.mjs: OK — append, metadata preservation, per-deployment files, structural read-time filtering, and the config-only fallback verified')
