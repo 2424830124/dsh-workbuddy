@@ -303,6 +303,22 @@ export async function beginLogin(ctx, region, options = {}) {
   return { started: true, url: authUrl, pending: false }
 }
 
+/**
+ * A stable identity for the logged-in account.
+ *
+ * Per-account records (availability verdicts, imported model lists) use it so one
+ * account's entitlements do not leak into another's. The catalog itself stays shared:
+ * which models a deployment offers is not an account fact.
+ */
+export async function accountIdOf(ctx, region) {
+  const meta = await readMeta(ctx, region)
+  const uid = meta?.uid
+  if (typeof uid === 'string' && uid.length > 0) return uid
+  if (typeof uid === 'number') return String(uid)
+  const nickname = typeof meta?.nickname === 'string' ? meta.nickname.trim() : ''
+  return nickname.length > 0 ? `nick:${nickname}` : undefined
+}
+
 /** One-line account summary for the command and the panel. */
 export async function regionStatus(ctx, region) {
   const token = await readToken(ctx, region)

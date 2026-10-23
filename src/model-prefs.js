@@ -18,7 +18,7 @@
  */
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 const PREFS_VERSION = 1
@@ -54,7 +54,8 @@ export function readPrefs(regionId) {
 function write(regionId, prefs) {
   try {
     mkdirSync(prefsDir(), { recursive: true })
-    const staging = join(tmpdir(), `dsh-workbuddy-enabled-${regionId}-${process.pid}.json`)
+    // Staged in the target directory so the rename cannot fail with EXDEV.
+    const staging = join(prefsDir(), `.enabled-${regionId}-${process.pid}.json`)
     writeFileSync(staging, JSON.stringify({
       version: PREFS_VERSION,
       updatedAt: Date.now(),

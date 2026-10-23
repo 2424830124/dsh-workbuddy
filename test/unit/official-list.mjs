@@ -86,4 +86,10 @@ assert.equal(codex.credits, undefined, 'no rate is invented from a capture')
 assert.equal(codex.imported, undefined, 'a joined model is not marked imported')
 assert.equal(richApplied.enriched, 1, 'only the thin entry was enriched')
 
-console.log('official-list.mjs: OK — import (ids or records), field-level enrichment without rates, policy filtering, and clearing verified')
+// An imported list belongs to the account that imported it.
+writeOfficialList('acct', ['hy3', 'glm-5.2'], { from: 'import', account: 'account-a' })
+assert.equal(readOfficialList('acct', 'account-a').ids.length, 2, 'the importing account sees its list')
+assert.equal(readOfficialList('acct', 'account-b'), undefined, 'another account does not inherit it')
+assert.equal(readOfficialList('acct').ids.length, 2, 'without an account the raw list still reads (legacy callers)')
+
+console.log('official-list.mjs: OK — import (ids or records), field-level enrichment without rates, policy filtering, per-account lists, and clearing verified')

@@ -32,7 +32,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { readToken } from './auth.js'
+import { accountIdOf, readToken } from './auth.js'
 import { chatRoutes } from './regions.js'
 
 const LEDGER_VERSION = 1
@@ -210,16 +210,19 @@ export async function probeModel(ctx, region, id, options = {}) {
 export const SWEEP_MIN_INTERVAL_MS = 24 * 3600_000
 
 /** Whether a sweep may run now; `manual` callers skip this check. */
-export function sweepDue(regionId, minIntervalMs = SWEEP_MIN_INTERVAL_MS, now = Date.now()) {
-  const last = readAvailability(regionId).lastSweepAt
+export function sweepDue(regionId, minIntervalMs = SWEEP_MIN_INTERVAL_MS, now = Date.now(), account) {
+  const last = readAvailability(regionId, account).lastSweepAt
   return { due: now - last >= minIntervalMs, lastSweepAt: last }
 }
 
 /** Probe a list of ids, a few at a time, and persist every verdict. */
 export async function runSweep(ctx, region, ids, options = {}) {
   const interval = options.minIntervalMs ?? SWEEP_MIN_INTERVAL_MS
+  // Verdicts describe one account's entitlements, so the sweep is scoped to whoever is
+  // logged in now: a new account starts from an empty ledger and gets its own probes.
+  const account = await accountIdOf(ctx, region)
   if (options.manual !== true) {
-    const due = sweepDue(region.id, interval)
+    const due = sweepDue(region.id, interval, Date.now(), account)
     if (due.due !== true) return { skipped: true, reason: 'interval', lastSweepAt: due.lastSweepAt, results: [] }
   }
   const token = await readToken(ctx, region)
@@ -236,9 +239,9 @@ export async function runSweep(ctx, region, ids, options = {}) {
     }
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, ids.length) }, () => worker()))
-  if (results.length > 0) writeAvailability(region.id, results)
-  markSwept(region.id)
-  return { skipped: false, results }
+  if (results.length > 0) writeAvailability(region.id, results, account)
+  markSwept(region.id, account)
+  return { skipped: false, results, account }
 }
 
 /** @returns {{ savedAt: number, lastSweepAt: number, models: Map<string, {state: string, detail: string, at: number}> }} */
@@ -314,9 +317,10 @@ export function writeAvailability(regionId, results, account) {
 }
 
 /** Record that a full sweep just ran, which is what the daily limit reads. */
-function markSwept(regionId) {
+function markSwept(regionId, account) {
   try {
-    const ledger = readAvailability(regionId)
+    const ledger = readLedger(regionId)
+    if (account !== undefined && ledger.account !== undefined && ledger.account !== account) return false
     ledger.lastSweepAt = Date.now()
     store(regionId, ledger, Date.now())
     return true
@@ -326,9 +330,9 @@ function markSwept(regionId) {
 }
 
 /** Ids the ledger considers unusable, within the verdict's TTL. */
-export function unusableModelIds(regionId, now = Date.now()) {
+export function unusableModelIds(regionId, now = Date.now(), account) {
   const unusable = new Set()
-  for (const [id, entry] of readAvailability(regionId).models) {
+  for (const [id, entry] of readAvailability(regionId, account).models) {
     if (!UNUSABLE_STATES.has(entry?.state)) continue
     if (typeof entry.at !== 'number' || now - entry.at > AVAILABILITY_TTL_MS) continue
     unusable.add(id)
@@ -337,9 +341,9 @@ export function unusableModelIds(regionId, now = Date.now()) {
 }
 
 /** Kept for callers that only care about delisted models. */
-export function deadModelIds(regionId, now = Date.now()) {
+export function deadModelIds(regionId, now = Date.now(), account) {
   const dead = new Set()
-  for (const [id, entry] of readAvailability(regionId).models) {
+  for (const [id, entry] of readAvailability(regionId, account).models) {
     if (entry?.state !== 'dead') continue
     if (typeof entry.at !== 'number' || now - entry.at > AVAILABILITY_TTL_MS) continue
     dead.add(id)
@@ -348,8 +352,8 @@ export function deadModelIds(regionId, now = Date.now()) {
 }
 
 /** One-line summary for the panel and the command. */
-export function availabilitySummary(regionId) {
-  const ledger = readAvailability(regionId)
+export function availabilitySummary(regionId, account) {
+  const ledger = readAvailability(regionId, account)
   const counts = new Map()
   for (const entry of ledger.models.values()) {
     const state = String(entry?.state ?? 'error')

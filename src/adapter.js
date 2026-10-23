@@ -18,7 +18,7 @@ import { writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { readToken, refreshRegion } from './auth.js'
+import { accountIdOf, readToken, refreshRegion } from './auth.js'
 import { unusableModelIds, readAvailability, writeAvailability } from './availability.js'
 import { fetchModelEntries } from './catalog.js'
 import { readCatalogCache, writeCatalogCache } from './catalog-cache.js'
@@ -409,6 +409,9 @@ export class WorkBuddyAdapter {
    * `resolveModel` still answers for ids the session already knows.
    */
   async models() {
+    // Remember which account these verdicts belong to: the ledger and the imported
+    // list are per-account, the catalog itself is shared.
+    this.accountId = await accountIdOf(this.ctx, this.region)
     const fresh = this.catalog !== undefined && Date.now() - this.catalogAt < CATALOG_TTL_MS
     if (fresh) return this.catalog
     let loaded
@@ -419,7 +422,7 @@ export class WorkBuddyAdapter {
     }
     // An imported account list wins over whatever the sources claim: it is the
     // one thing that reflects what this account may actually pick.
-    const imported = readOfficialList(this.region.id)
+    const imported = readOfficialList(this.region.id, this.accountId)
     if (loaded.entries.length > 0) {
       const applied = applyOfficialList(loaded.entries, imported)
       this.catalog = applied.entries
@@ -474,7 +477,7 @@ export class WorkBuddyAdapter {
    * model id. The panel groups by these; the picker hides `dead` ones.
    */
   availability() {
-    return readAvailability(this.region.id).models
+    return readAvailability(this.region.id, this.accountId).models
   }
 
   /**
@@ -487,7 +490,7 @@ export class WorkBuddyAdapter {
   rememberUnusable(model, code, detail) {
     const text = String(detail)
     if (/11102|service info not found/i.test(text)) {
-      writeAvailability(this.region.id, [{ id: model, state: 'dead', detail: '模型不存在（11102 service info not found）', at: Date.now() }])
+      writeAvailability(this.region.id, [{ id: model, state: 'dead', detail: '模型不存在（11102 service info not found）', at: Date.now() }], this.accountId)
       this.invalidateCatalog()
       // The verdict feeds the default on/off state, so the picker has to re-read.
       notifyModelTopology(this.ctx)
@@ -495,7 +498,7 @@ export class WorkBuddyAdapter {
     }
     if (/11158|is not allowed for user type/i.test(text)) {
       const type = /user type \[([^\]]{0,40})\]/i.exec(text)?.[1] ?? ''
-      writeAvailability(this.region.id, [{ id: model, state: 'denied', detail: `账号无权限（11158${type.length > 0 ? `，用户类型 ${type}` : ''}）`, at: Date.now() }])
+      writeAvailability(this.region.id, [{ id: model, state: 'denied', detail: `账号无权限（11158${type.length > 0 ? `，用户类型 ${type}` : ''}）`, at: Date.now() }], this.accountId)
       this.invalidateCatalog()
       notifyModelTopology(this.ctx)
     }

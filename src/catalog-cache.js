@@ -27,7 +27,7 @@
  */
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { isCatalogModelId, keepModel, withConsistentEfforts } from './catalog.js'
@@ -143,7 +143,9 @@ export function writeCatalogCache(regionId, source, entries) {
 
     const dir = cacheDir()
     mkdirSync(dir, { recursive: true })
-    const staging = join(tmpdir(), `dsh-workbuddy-catalog-${regionId}-${process.pid}.json`)
+    // Staged inside the target directory: a temp file on another volume makes the
+    // rename below fail with EXDEV, and by then the current file has already been moved.
+    const staging = join(dir, `.catalog-${regionId}-${process.pid}.json`)
     writeFileSync(staging, JSON.stringify({
       version: CACHE_VERSION,
       savedAt: now,

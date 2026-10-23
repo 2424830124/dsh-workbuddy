@@ -104,4 +104,13 @@ writeAvailability('intl', [{ id: 'gpt-5.6-sol', state: 'ok', detail: '', at: Dat
 assert.equal(readAvailability('intl').models.size, 1)
 assert.equal(readAvailability('cn').models.size, 5, 'ledgers are per deployment')
 
-console.log('availability.mjs: OK — probe classification, dead-in-TTL rule, merge, and per-deployment ledgers verified')
+// Verdicts belong to an account: another account must not inherit "denied", and its
+// own probe results start a fresh ledger.
+writeAvailability('acct', [{ id: 'hy3', state: 'denied', detail: '账号无权限', at: Date.now() }], 'account-a')
+assert.equal(readAvailability('acct', 'account-a').models.size, 1, 'the owning account sees its verdicts')
+assert.equal(readAvailability('acct', 'account-b').models.size, 0, 'another account starts empty')
+writeAvailability('acct', [{ id: 'glm-5.2', state: 'ok', detail: '', at: Date.now() }], 'account-b')
+assert.equal(readAvailability('acct', 'account-b').models.size, 1, 'the new account only has its own probe')
+assert.ok(!readAvailability('acct', 'account-b').models.has('hy3'), 'the previous account denial is gone')
+
+console.log('availability.mjs: OK — probe classification, dead-in-TTL rule, merge, per-deployment ledgers, and per-account verdicts verified')

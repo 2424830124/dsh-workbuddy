@@ -14,7 +14,7 @@ import { readFileSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
-import { beginLogin, logoutRegion, pendingLogins, readMeta, readToken, refreshRegion, regionStatus } from './auth.js'
+import { accountIdOf, beginLogin, logoutRegion, pendingLogins, readMeta, readToken, refreshRegion, regionStatus } from './auth.js'
 import { invalidateBusy, fetchBusyLevels } from './busy.js'
 import { SWEEP_MIN_INTERVAL_MS, availabilitySummary, readAvailability, runSweep, sweepDue, unusableModelIds } from './availability.js'
 import { claimDailyCheckin, fetchCheckinStatus, fetchCredits } from './credits.js'
@@ -239,8 +239,9 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
             notifyModelTopology(ctx)
           }
           const models = await adapter.models()
-          const ledger = readAvailability(region.id)
-          const imported = readOfficialList(region.id)
+          const account = await accountIdOf(ctx, region)
+  const ledger = readAvailability(region.id, account)
+          const imported = readOfficialList(region.id, account)
           const prefs = readPrefs(region.id)
           const dead = unusableModelIds(region.id)
           sendJson(res, 200, {
@@ -463,7 +464,7 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
         }
         const adapter = adapters[region.id]
         if (method === 'GET') {
-          const list = readOfficialList(region.id)
+          const list = readOfficialList(region.id, await accountIdOf(ctx, region))
           sendJson(res, 200, {
             region: region.id,
             ids: list?.ids ?? [],
@@ -483,7 +484,7 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
             return
           }
           const source = typeof body.from === 'string' && body.from.length > 0 ? body.from : 'web-session'
-          const result = writeOfficialList(region.id, body.models, { from: source })
+          const result = writeOfficialList(region.id, body.models, { from: source, account: await accountIdOf(ctx, region) })
           adapter?.invalidateCatalog()
           const models = adapter === undefined ? [] : await adapter.models()
           notifyModelTopology(ctx)

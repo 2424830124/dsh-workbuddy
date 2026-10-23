@@ -53,8 +53,12 @@ async function executeCommand(ctx, adapters, invocation) {
     for (const region of regions) {
       try {
         const result = await beginLogin(ctx, region, {
-          onSuccess: () => {
+          onSuccess: async () => {
             adapters[region.id]?.invalidateCatalog()
+            // The availability ledger belongs to the account, so a new login starts with
+            // no verdicts: probe this account once, which is how "which models can this
+            // account use" gets answered (the catalog itself stays shared).
+            void probeAccount(region)
             // A fresh account usually has today's check-in waiting.
             void claimDailyCheckin(ctx, region).then(async (outcome) => {
               if (outcome.claimed) ctx.logger.info(`[workbuddy] ${region.id}: 登录后签到成功，获得 ${outcome.credit ?? 0} 积分`)
@@ -241,6 +245,24 @@ export function apply(ctx) {
   // run every time the panel opens (its probe never generates), the
   // international one once a day (its probe costs a token per model).
   const AVAILABILITY_BOOT_DELAY_MS = 45_000
+  /** Probe every model once for the account that just logged in. */
+  const probeAccount = async (region) => {
+    const adapter = adapters[region.id]
+    if (adapter === undefined) return
+    try {
+      adapter.invalidateCatalog()
+      const entries = await adapter.models()
+      if (entries.length === 0) return
+      const result = await runSweep(ctx, region, entries.map((entry) => entry.id), { manual: true })
+      if (result.skipped === true) return
+      const counts = new Map()
+      for (const verdict of result.results) counts.set(verdict.state, (counts.get(verdict.state) ?? 0) + 1)
+      ctx.logger.info(`[workbuddy] ${region.id}: 登录后可用性检测完成 ${result.results.length} 个 — ${[...counts.entries()].map(([state, count]) => `${state} ${count}`).join(' / ')}`)
+      notifyModelTopology(ctx)
+    } catch (error) {
+      ctx.logger.warn(`[workbuddy] ${region.id}: 登录后可用性检测失败 — ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   const availabilityTimer = setTimeout(() => {
     for (const id of REGION_IDS) {
       const region = REGIONS[id]

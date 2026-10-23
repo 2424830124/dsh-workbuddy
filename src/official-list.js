@@ -26,7 +26,7 @@
  */
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { entryFromMeta, isAdvertisableId } from './catalog.js'
@@ -58,10 +58,13 @@ function normalizeItem(item) {
 }
 
 /** @returns {{ ids: string[], entries: object[], importedAt: number, from: string } | undefined} */
-export function readOfficialList(regionId) {
+export function readOfficialList(regionId, account) {
   try {
     const parsed = JSON.parse(readFileSync(listPath(regionId), 'utf8'))
     if (parsed?.version !== LIST_VERSION || !Array.isArray(parsed.ids)) return undefined
+    // An imported list is one account's entitlements; another account must not inherit
+    // it, or a freshly logged-in account would show the previous account's models.
+    if (account !== undefined && typeof parsed.account === 'string' && parsed.account !== account) return undefined
     const ids = parsed.ids.filter((id) => typeof id === 'string' && id.length > 0)
     if (ids.length === 0) return undefined
     const entries = Array.isArray(parsed.entries) ? parsed.entries : []
@@ -109,9 +112,11 @@ export function writeOfficialList(regionId, models, options = {}) {
     const ids = [...byId.keys()]
     const entries = ids.filter((id) => byId.get(id).rich).map((id) => byId.get(id).entry)
     mkdirSync(listDir(), { recursive: true })
-    const staging = join(tmpdir(), `dsh-workbuddy-official-${regionId}-${process.pid}.json`)
+    // Staged in the target directory so the rename cannot fail with EXDEV.
+    const staging = join(listDir(), `.official-${regionId}-${process.pid}.json`)
     writeFileSync(staging, JSON.stringify({
       version: LIST_VERSION,
+      ...(typeof options.account === 'string' && options.account.length > 0 ? { account: options.account } : {}),
       importedAt: Date.now(),
       from: typeof options.from === 'string' && options.from.length > 0 ? options.from : 'import',
       ids,
