@@ -1051,18 +1051,20 @@ window.__ModuleLoader__.load({
          * once more afterwards, because rounding can push it over the next unit:
          * 999999 divides to 1000K, which is 1M, not "1000K".
          *
-         * Whole numbers only: these are capacities, not measurements, and "192.00K" reads
-         * like a precision the catalog does not have.
+         * At most one decimal, and none when the figure is whole: 1.5M keeps its half,
+         * 192000 is "192K" rather than "192.0K". A trailing ".0" would claim a precision the
+         * catalog does not publish.
          */
         const formatTokens = (value) => {
           if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined
+          const short = (number) => String(Number(number.toFixed(1)))
           const digits = String(Math.trunc(value)).length
-          if (digits >= 7) return `${Math.round(value / 1_000_000)}M`
+          if (digits >= 7) return `${short(value / 1_000_000)}M`
           if (digits >= 4) {
-            const thousands = Math.round(value / 1000)
+            const thousands = Number((value / 1000).toFixed(1))
             // Rounding can cross the unit: 999999 / 1000 is 1000K, which belongs in M.
-            if (thousands >= 1000) return `${Math.round(value / 1_000_000)}M`
-            return `${thousands}K`
+            if (thousands >= 1000) return `${short(value / 1_000_000)}M`
+            return `${short(value / 1000)}K`
           }
           return String(value)
         }
