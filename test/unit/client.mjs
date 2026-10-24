@@ -343,16 +343,26 @@ for (const expected of ['账户', '大陆版', '海外版', '示例账号', '可
 }
 assert.ok(titlesOf(signedInTree).some((title) => title.startsWith('繁忙程度：')), 'the load tag explains itself in a tooltip')
 
-// The published snapshot after a real render: keyed by the full provider id, one entry per
-// deployment, and each model carrying exactly the fields a selector would act on.
+// The published snapshot: keyed by the full provider id, one entry per deployment, and each
+// model carrying exactly the fields a selector would act on.
+//
+// `refresh()` is the loader the plugin starts on its own; calling it here rather than
+// waiting for the mount effect keeps the assertion about the loader rather than about
+// timing, and pins the thing the reviewer found: both deployments are read, not just the
+// one the panel happens to show.
 {
-  const snapshot = provided.get('@huai_xin/dsh-workbuddy/state').getSnapshot()
-  assert.ok(snapshot.updatedAt > 0, 'the panel published once it loaded')
+  const service = provided.get('@huai_xin/dsh-workbuddy/state')
+  await service.refresh()
+  const snapshot = service.getSnapshot()
+  assert.ok(snapshot.updatedAt > 0, 'the loader published')
   assert.deepEqual(Object.keys(snapshot.providers).sort(), ['@huai_xin/dsh-workbuddy/cn', '@huai_xin/dsh-workbuddy/intl'])
+
   const cn = snapshot.providers['@huai_xin/dsh-workbuddy/cn']
+  const intl = snapshot.providers['@huai_xin/dsh-workbuddy/intl']
   assert.equal(cn.region, 'cn')
   assert.equal(cn.loggedIn, true)
   assert.equal(typeof cn.credits, 'number', 'the balance travels with the snapshot')
+
   const hy3 = cn.models.hy3
   assert.ok(hy3 !== undefined, 'a model is keyed by its id')
   assert.equal(hy3.name, 'Hy3')
@@ -363,7 +373,15 @@ assert.ok(titlesOf(signedInTree).some((title) => title.startsWith('繁忙程度�
   assert.equal(cn.models['glm-5.0'].available, false, 'a dead model is not available')
   assert.equal(cn.models['glm-5.0'].enabled, false)
   assert.ok(!('default-model' in cn.models), 'router presets are not published as models')
+
+  assert.ok(Object.keys(intl.models).length > 0, 'the deployment the panel is NOT showing still publishes its models')
+  assert.equal(intl.models.hy3.enabled, true, 'and carries the same fields')
   assert.doesNotThrow(() => JSON.stringify(snapshot), 'the whole snapshot is JSON-serializable')
+
+  // Concurrent callers share one read: the panel's actions and the timer can overlap.
+  const before = snapshot.updatedAt
+  await Promise.all([service.refresh(), service.refresh(), service.refresh()])
+  assert.ok(service.getSnapshot().updatedAt >= before, 'three refreshes leave a consistent snapshot')
 }
 
 /** Find actual rendered elements without invoking a second renderer. */

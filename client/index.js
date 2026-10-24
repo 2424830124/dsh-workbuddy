@@ -733,14 +733,46 @@ window.__ModuleLoader__.load({
     function createStateService() {
       let snapshot = EMPTY_SNAPSHOT
       const listeners = new Set()
-      return {
+      /** @type {Promise<void> | undefined} */
+      let inFlight
+
+      /**
+       * Read both deployments and publish.
+       *
+       * Every deployment, not just the one the panel happens to show: a selector lists
+       * models from both, so a snapshot with one side empty is worse than useless. Each
+       * deployment is read on its own (`/models`, and `/busy` only where it exists), so one
+       * failing side still publishes the other.
+       *
+       * Concurrent callers share the promise — the panel can fire this on every action
+       * while the timer is also running.
+       */
+      const load = async () => {
+        const state = await request('/state')
+        const modelMap = {}
+        const busyLevels = {}
+        await Promise.all((state?.regions ?? []).map(async (region) => {
+          if (typeof region?.id !== 'string') return
+          const [models, busy] = await Promise.all([
+            request(`/models?region=${encodeURIComponent(region.id)}`).catch(() => undefined),
+            region.hasBusy === true
+              ? request(`/busy?region=${encodeURIComponent(region.id)}`).catch(() => undefined)
+              : Promise.resolve(undefined)
+          ])
+          modelMap[region.id] = { list: models?.models ?? [] }
+          if (busy?.levels !== undefined) busyLevels[region.id] = busy.levels
+        }))
+        service.publish(buildStateSnapshot(state, modelMap, busyLevels))
+      }
+
+      const service = {
         getSnapshot: () => snapshot,
         subscribe(listener) {
           if (typeof listener !== 'function') return () => {}
           listeners.add(listener)
           return () => { listeners.delete(listener) }
         },
-        /** @internal — the panel pushes what it loaded. */
+        /** @internal — only the loader and the panel's own actions publish. */
         publish(next) {
           snapshot = next
           for (const listener of [...listeners]) {
@@ -748,16 +780,31 @@ window.__ModuleLoader__.load({
             try { listener(snapshot) } catch { /* ignore */ }
           }
         },
+        /**
+         * Re-read both deployments. Resolves when the snapshot is published; rejects only
+         * if `/state` itself failed (the per-deployment reads are already tolerated).
+         */
+        refresh() {
+          if (inFlight !== undefined) return inFlight
+          const task = load().finally(() => { inFlight = undefined })
+          inFlight = task
+          return task
+        },
         async refreshCredits(region) {
           const id = regionIdOf(region)
           if (id === undefined) throw new Error(`unknown region: ${region}`)
           const result = await request(`/credits?region=${encodeURIComponent(id)}`)
+          // The panel's own row is updated by the caller; the snapshot follows so the two
+          // never disagree about a balance.
+          void service.refresh().catch(() => undefined)
           return result?.credits ?? null
         },
         async login(region) {
           const id = regionIdOf(region)
           if (id === undefined) throw new Error(`unknown region: ${region}`)
-          return request('/login', { method: 'POST', body: JSON.stringify({ region: id }) })
+          const result = await request('/login', { method: 'POST', body: JSON.stringify({ region: id }) })
+          void service.refresh().catch(() => undefined)
+          return result
         },
         async renew(region) {
           const ids = region === undefined ? PLACEHOLDER_REGIONS.map((entry) => entry.id) : [regionIdOf(region)]
@@ -766,9 +813,11 @@ window.__ModuleLoader__.load({
           for (const id of ids) {
             results.push(await request('/refresh', { method: 'POST', body: JSON.stringify({ region: id }) }))
           }
+          void service.refresh().catch(() => undefined)
           return results
         }
       }
+      return service
     }
 
     const stateService = createStateService()
@@ -902,15 +951,17 @@ window.__ModuleLoader__.load({
       }, [region?.id, region?.loggedIn, modelCount])
 
       /**
-       * Publish what the panel knows, for other client plugins.
+       * The panel no longer publishes the snapshot itself.
        *
-       * An effect rather than the render body: publishing notifies subscribers, and doing
-       * that mid-render is how a consumer's setState lands in the middle of ours. The deps
-       * are the three inputs `buildStateSnapshot` reads, so the snapshot follows the data.
+       * It only ever loads the tab it is showing, so publishing from here meant the other
+       * deployment's models were always missing — and worse, only while this component was
+       * mounted at all. The plugin-level loader (`stateService.refresh()`, started from
+       * `apply`) owns the snapshot and reads both deployments; the panel just asks for a
+       * re-read after it changes something.
        */
       React.useEffect(() => {
-        stateService.publish(buildStateSnapshot(state, modelMap, busyLevels))
-      }, [state, modelMap, busyLevels])
+        void stateService.refresh().catch(() => undefined)
+      }, [])
 
       // Actions that can change which models exist. Anything else (credits refresh,
       // check-in, availability probe) must not drop the cached list: the models effect
@@ -950,6 +1001,10 @@ window.__ModuleLoader__.load({
           setError(cause instanceof Error ? cause.message : String(cause))
           return undefined
         } finally {
+          // Whatever happened — a switch flipped, a login started, a name imported — the
+          // published snapshot is now stale, and a selector reading it has no other way to
+          // find out. Fire and forget: a failure here must not surface as the action's own.
+          void stateService.refresh().catch(() => undefined)
           setBusy('')
         }
       }
@@ -1717,6 +1772,25 @@ window.__ModuleLoader__.load({
             try {
               ctx.provide(STATE_SERVICE, stateService)
               report('state-service-provided')
+
+              // Load without waiting for the panel to be opened: a selector reads this the
+              // moment it mounts, and "open settings once" is not something a consumer can
+              // demand of a user. Delayed so plugin load stays free of network I/O, then
+              // refreshed on a timer because a balance and a busy level go stale on their
+              // own — and after any action, which the panel triggers itself.
+              const first = setTimeout(() => { void stateService.refresh().catch(() => undefined) }, 2_000)
+              const interval = setInterval(() => { void stateService.refresh().catch(() => undefined) }, 5 * 60_000)
+              // `unref` does not exist in a browser and does in Node, where the test suite
+              // runs this bundle: without it the process never exits, because a pending
+              // interval keeps the event loop alive.
+              first.unref?.()
+              interval.unref?.()
+              if (typeof ctx.effect === 'function') {
+                ctx.effect(() => () => {
+                  clearTimeout(first)
+                  clearInterval(interval)
+                }, 'dsh-workbuddy: state service refresh')
+              }
             } catch (failure) {
               // An older host without services: the panel works, the integration does not.
               report(`state-service-failed: ${failure instanceof Error ? failure.message : String(failure)}`)
