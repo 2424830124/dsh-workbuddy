@@ -1049,21 +1049,20 @@ window.__ModuleLoader__.load({
          * The unit is chosen from how many digits the number has — four digits is a
          * thousands figure, seven or more is millions — and the divided result is checked
          * once more afterwards, because rounding can push it over the next unit:
-         * 999999 divides to 1000.00K, which is 1.00M, not "1000.00K".
+         * 999999 divides to 1000K, which is 1M, not "1000K".
          *
-         * Suffixes are upper case, matching model cards and pricing pages; two decimals keep
-         * a column comparable.
+         * Whole numbers only: these are capacities, not measurements, and "192.00K" reads
+         * like a precision the catalog does not have.
          */
         const formatTokens = (value) => {
           if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined
           const digits = String(Math.trunc(value)).length
-          if (digits >= 7) return `${(value / 1_000_000).toFixed(2)}M`
+          if (digits >= 7) return `${Math.round(value / 1_000_000)}M`
           if (digits >= 4) {
-            const thousands = value / 1000
-            // Compare the *rounded* figure, not the raw one: 999999 / 1000 = 999.999 is
-            // below 1000, but it rounds to "1000.00K", which is 1.00M.
-            if (Number(thousands.toFixed(2)) >= 1000) return `${(value / 1_000_000).toFixed(2)}M`
-            return `${thousands.toFixed(2)}K`
+            const thousands = Math.round(value / 1000)
+            // Rounding can cross the unit: 999999 / 1000 is 1000K, which belongs in M.
+            if (thousands >= 1000) return `${Math.round(value / 1_000_000)}M`
+            return `${thousands}K`
           }
           return String(value)
         }
