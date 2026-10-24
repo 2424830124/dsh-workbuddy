@@ -89,7 +89,8 @@ assert.equal(classifyProbe(401, 'nope').state, 'auth')
 assert.equal(classifyProbe(502, '<html>502</html>').state, 'down')
 assert.equal(classifyProbe(0, '').state, 'error', 'a transport failure is not a verdict about the model')
 
-// Only `dead` hides a model; queueing and provider hiccups must not.
+// Only `dead` counts as delisted; queueing and provider hiccups are not verdicts about
+// the model (they no longer *hide* one — the switch decides that — but they still group).
 assert.deepEqual(deadModelIds('cn'), new Set(), 'nothing is dead before the first sweep')
 
 writeAvailability('cn', [
@@ -98,7 +99,7 @@ writeAvailability('cn', [
   { id: 'step-5-preview', state: 'busy', detail: '排队', at: Date.now() },
   { id: 'glm-5.1', state: 'rejected', detail: '参数被拒', at: Date.now() }
 ])
-assert.deepEqual([...deadModelIds('cn')], ['glm-4.6'], 'only the dead verdict hides a model')
+assert.deepEqual([...deadModelIds('cn')], ['glm-4.6'], 'only the dead verdict counts as delisted')
 
 const ledger = readAvailability('cn')
 assert.equal(ledger.models.size, 4)
@@ -111,7 +112,7 @@ assert.equal(readAvailability('cn').models.size, 4, 'other verdicts stay')
 
 // An old `dead` verdict ages out, so a model is advertised again and re-probed.
 writeAvailability('cn', [{ id: 'glm-4.7', state: 'dead', detail: '模型不存在', at: Date.now() - AVAILABILITY_TTL_MS - 1000 }])
-assert.ok(!deadModelIds('cn').has('glm-4.7'), 'a verdict past its TTL no longer hides a model')
+assert.ok(!deadModelIds('cn').has('glm-4.7'), 'a verdict past its TTL is no longer delisted')
 assert.equal(readAvailability('cn').models.get('glm-4.7').state, 'dead', 'the stale verdict is still shown')
 
 const summary = availabilitySummary('cn')

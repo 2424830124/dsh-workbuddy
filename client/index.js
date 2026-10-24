@@ -1237,6 +1237,9 @@ window.__ModuleLoader__.load({
        * Only genuinely undecided states (a 5xx, an unparsed body) stay in 可用 with a grey
        * chip: nothing has been proven about them either way. The rule itself lives at module
        * scope (`isUnusable`) so the published snapshot groups identically.
+       *
+       * Grouping is display-only: it decides which card a row sits in, not whether the model
+       * is offered — that is the switch alone (default off, see model-prefs.js).
        */
       const unusableState = (model) => isUnusable(model)
       const presets = rows.filter((model) => model.preset === true)

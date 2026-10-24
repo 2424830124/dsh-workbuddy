@@ -370,25 +370,27 @@ export class WorkBuddyAdapter {
 
   /**
    * The verdicts the availability ledger holds for this deployment, keyed by
-   * model id. The panel groups by these; the picker hides `dead` ones.
+   * model id. The panel groups by these; the snapshot reports them as tokens.
    */
   availability() {
     return readAvailability(this.region.id, this.accountId).models
   }
 
   /**
-   * Record a model's own failure so the picker stops offering it.
+   * Record a model's own failure so the panel relabels it.
    *
    * Learned from real turns rather than a sweep: `11102` means the id is gone,
    * `11158` means this account may not use the model. Neither costs anything
-   * extra — the user already spent that request.
+   * extra — the user already spent that request. The recorded verdict does not
+   * switch anything on or off any more; it only changes what the panel shows
+   * and what the state service reports.
    */
   rememberUnusable(model, code, detail) {
     const text = String(detail)
     if (/11102|service info not found/i.test(text)) {
       writeAvailability(this.region.id, [{ id: model, state: 'dead', detail: '模型不存在（11102 service info not found）', at: Date.now() }], this.accountId)
       this.invalidateCatalog()
-      // The verdict feeds the default on/off state, so the picker has to re-read.
+      // The verdict changes what the panel groups, so the picker has to re-read.
       notifyModelTopology(this.ctx)
       return
     }

@@ -55,6 +55,9 @@ async function executeCommand(ctx, adapters, invocation) {
         const result = await beginLogin(ctx, region, {
           onSuccess: async () => {
             adapters[region.id]?.invalidateCatalog()
+            // Same as the panel route: the token arrives after this request has answered, and
+            // the picker caches its catalog until it hears the topology event.
+            notifyModelTopology(ctx)
             // The availability ledger belongs to the account, so a new login starts with
             // no verdicts: probe this account once, which is how "which models can this
             // account use" gets answered (the catalog itself stays shared).
@@ -90,6 +93,8 @@ async function executeCommand(ctx, adapters, invocation) {
     const lines = []
     for (const region of regions) {
       const result = await refreshRegion(ctx, region, { force: true })
+      // A renewed credential can unblock reads the old one was rejected for.
+      if (result.refreshed === true) notifyModelTopology(ctx)
       lines.push(`${region.label}：${result.refreshed ? '已续期' : `未续期（${result.reason}）`}`)
     }
     return { kind: 'success', text: lines.join('\n') }
@@ -208,7 +213,7 @@ export function apply(ctx) {
           }
           if (audit.models === 0 && catalog.length > 0) {
             const prefs = readPrefs(id)
-            ctx.logger.warn(`[workbuddy] ${id}: 目录有模型但选择器为空 — 手工开关 开${prefs.on.size}/关${prefs.off.size}，请在面板里检查「全部启用」与每行开关`)
+            ctx.logger.warn(`[workbuddy] ${id}: 目录有模型但选择器为空 — 当前手工启用 ${prefs.enabled.size} 个（默认全部停用），请检查登录状态、可用性判定与每行开关`)
           }
         } catch (error) {
           ctx.logger.error(`[workbuddy] ${id}: 列举选择器模型失败 — ${error instanceof Error ? error.message : String(error)}`)
@@ -284,7 +289,8 @@ export function apply(ctx) {
         for (const verdict of result.results) counts.set(verdict.state, (counts.get(verdict.state) ?? 0) + 1)
         ctx.logger.info(`[workbuddy] ${id}: 启动可用性检测完成 ${result.results.length} 个${region.freeProbe === true ? '（零消耗）' : '（每个模型一个 token）'} — ${[...counts.entries()].map(([state, count]) => `${state} ${count}`).join(' / ')}`)
         adapter.invalidateCatalog()
-        // Verdicts decide the default on/off state, so tell the picker to re-read.
+        // The verdicts change what the panel shows and what the snapshot reports, so the
+        // picker and the state service have to re-read.
         notifyModelTopology(ctx)
       })().catch((error) => {
         ctx.logger.warn(`[workbuddy] ${id}: 启动可用性检测失败 — ${error instanceof Error ? error.message : String(error)}`)

@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 
 import { accountIdOf, beginLogin, logoutRegion, pendingLogins, readMeta, readToken, refreshRegion, regionStatus } from '../account/auth.js'
 import { invalidateBusy, fetchBusyLevels } from '../catalog/busy.js'
-import { SWEEP_MIN_INTERVAL_MS, availabilitySummary, readAvailability, runSweep, sweepDue, unusableModelIds } from '../catalog/availability.js'
+import { SWEEP_MIN_INTERVAL_MS, availabilitySummary, readAvailability, runSweep, sweepDue } from '../catalog/availability.js'
 import { claimDailyCheckin, fetchCheckinStatus, fetchCredits } from '../account/credits.js'
 import { localDayKey } from '../core/http.js'
 import { isEnabled, readPrefs, setEnabled } from '../catalog/model-prefs.js'
@@ -254,10 +254,9 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
           }
           const models = await adapter.models()
           const account = await accountIdOf(ctx, region)
-  const ledger = readAvailability(region.id, account)
+          const ledger = readAvailability(region.id, account)
           const imported = readOfficialList(region.id, account)
           const prefs = readPrefs(region.id)
-          const dead = unusableModelIds(region.id)
           sendJson(res, 200, {
             region: region.id,
             source: adapter.catalogSource ?? 'none',

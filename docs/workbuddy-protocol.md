@@ -503,7 +503,7 @@ POST /v2/chat/busy            Authorization: Bearer <token>   Content-Type: appl
 
 失败响应的语义（用于判定与展示）：
 
-| 响应 | 语义 | 面板标签 | 算不算"不可用" |
+| 响应 | 语义 | 面板标签 | 进「不可用」分组 |
 | --- | --- | --- | --- |
 | `400 11133`（探测中）/ `200` | 模型存在 | 不显示 | 否 |
 | `400 11151 a message has empty content` | 模型存在，先校验了对话内容 | 不显示 | 否 |
@@ -515,7 +515,8 @@ POST /v2/chat/busy            Authorization: Bearer <token>   Content-Type: appl
 | `5xx` | 上游故障 | 未知（灰） | 否 |
 | 其它 4xx | 走到了参数层（说明模型存在） | 未知（灰） | 否 |
 
-判定结论的有效期定为 **12 小时**：过期后重新出现在列表里并在下次检测时复验，避免一次抖动把模型永久拉黑。
+判定结论的有效期定为 **12 小时**：过期后重新复验，避免一次抖动把模型永久归入不可用分组。
+判定只影响分组与展示；模型开不开由用户的开关决定（`0.8.0` 起默认全部停用）。
 
 ---
 
@@ -672,7 +673,9 @@ POST /v2/chat/completions {"model":"glm-4.6", …}
 
 `111xx` 都是网关层业务码，容易混淆，对照如下：`11101` 不支持非流式 · `11102` 模型未接入（本码）· `11128` 渠道/提示词指纹被拦 · `11133` 上游模型拒绝参数（模型本身存在，换参数可试）。
 
-因此本插件**只把 `11102` 当作"不可用"的判据**（见 §4.9）：命中即记入可用性台账并 12 小时内不再展示，其余错误码只展示不拉黑。
+因此本插件只把 `11102`（模型未接入）与 `11158`（无权限）当作"进不可用分组"的判据（见 §4.9）：
+命中即记入可用性台账并 12 小时内复验；判定**只影响分组与展示，不再决定开关的默认值** ——
+`0.8.0` 起模型默认全部停用，用户启用了哪些就展示哪些。
 
 ---
 
@@ -733,7 +736,7 @@ Web GUI 段落都**原样保留**。实测：这样做之后，完整 DSH 提示
 | 上下文窗口 | scoped `maxInputTokens` / `contextWindow.supportedLengths` | `/v3/config` `maxInputTokens` | 缓存中保留的旧值 |
 | 思考档位 | 两个源的 `reasoning.supportedEfforts` 并集 | `reasoning.defaultEffort` / `reasoning.effort`（单档） | 缓存中保留的旧值 |
 | 倍率 / 促销 | `credits` 字段 + `modelPromotions`（**纯实时，不进缓存**） | 无 | 「未知」 |
-| 实时繁忙度 | `POST /v2/chat/busy`（仅大陆版） | 无 | 不显示 |
+| 实时繁忙度 | `POST /v2/chat/busy`（仅大陆版） | 无 | 「未知」 |
 | **真实可用性** | 每个模型一个 `max_tokens:1` 的最小请求（唯一可靠判据） | — | 未检测 |
 
 | 积分余额 | `get-user-resource`（`*Precise` 字段） | 无 | 显示「未知」 |
@@ -996,7 +999,7 @@ provider 与全部 HTTP 路由都没注册，设置面板只剩一个 `HTTP 404`
 | `test/unit/catalog.mjs` | 双数据源并发抓取、合并、回退 |
 | `test/unit/catalog-cache.mjs` | 追加语义、字段保留、按部署分文件、读取时过滤 |
 | `test/unit/official-list.mjs` | 名单导入（id 或记录）、字段级富化（不含倍率）、清理 |
-| `test/unit/model-prefs.mjs` | 判定默认值、手工覆盖、批量开关、重置、分部署探测形态 |
+| `test/unit/model-prefs.mjs` | 默认全停、只记启用集合、批量开关、退出保留、v1 迁移、分部署探测形态 |
 | `test/unit/availability.mjs` | 探测分类、TTL 内的 dead 规则、合并、分部署台账 |
 | `test/unit/adapter.mjs` | 渠道指纹改写、请求体组装、路由顺序、排队错误映射 |
 

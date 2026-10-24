@@ -122,7 +122,7 @@ export function setEnabled(regionId, ids, enabled, options = {}) {
     if (enabled) prefs.enabled.add(id)
     else prefs.enabled.delete(id)
   }
-  // A hand decision is also a login-scoped state: writing it clears the stale marker so a
-  // switch flipped while logged out cannot stay hidden after the next login.
+  // Writing a choice also clears a stale logged-out marker, so a switch flipped while
+  // logged out cannot stay hidden after the next login.
   return { saved: write(regionId, prefs), on: prefs.enabled.size, off: 0 }
 }

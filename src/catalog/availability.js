@@ -42,7 +42,7 @@ export const AVAILABILITY_TTL_MS = 12 * 3600_000
 const PROBE_CONCURRENCY = 3
 const PROBE_TIMEOUT_MS = 30_000
 
-/** States that keep a model out of the picker by default. */
+/** States that keep a model out of the picker's usable group. */
 const UNUSABLE_STATES = new Set(['dead', 'denied'])
 
 function ledgerDir() {
@@ -344,7 +344,10 @@ function markSwept(regionId, account) {
   }
 }
 
-/** Ids the ledger considers unusable, within the verdict's TTL. */
+/**
+ * Ids the ledger currently groups as unusable (dead or no-permission, within the verdict's
+ * TTL). The panel uses this for its 不可用 group; nothing offers a default from it any more.
+ */
 export function unusableModelIds(regionId, now = Date.now(), account) {
   const unusable = new Set()
   for (const [id, entry] of readAvailability(regionId, account).models) {

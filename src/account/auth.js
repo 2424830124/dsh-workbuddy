@@ -89,8 +89,9 @@ export async function logoutRegion(ctx, region) {
   unsetCredential(region.tokenRef)
   unsetCredential(region.metaRef)
   // Hiding the models is part of logging out: the picker kept offering them because the
-  // cached catalog and the hand decisions were still there, so a logged-out deployment
-  // looked callable. The marker is cleared by `clearLoggedOut` on the next login.
+  // cached catalog was still there, so a logged-out deployment looked callable. The enabled
+  // set is deliberately left alone — it records what the user chose, not what the credentials
+  // currently allow — and the marker is cleared by `clearLoggedOut` on the next login.
   markLoggedOut(region.id)
   ctx.logger.info(`[workbuddy] ${region.id}: 已退出登录，凭据已删除，模型已从选择器移除`)
 }
