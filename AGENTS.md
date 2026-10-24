@@ -76,10 +76,11 @@ ctx.provide('@huai_xin/dsh-workbuddy/state', stateService)
       models: {
         // 键是模型 id，只收**启用**的模型
         hy3: {
-          显示名称: 'Hy3',
-          探测结果: '可用',        // 或 限流 / 无权限 / 积分不足 / 凭据失效 / 未知 / 不可用
-          繁忙状态: '空闲',        // 或 繁忙 / 拥堵 / 未知
-          倍率: '0.11x'           // 或 免费 / 未知
+          name: 'Hy3',
+          verdict: 'available',   // 或 rate limited / no permission / out of credits /
+                                  //    credentials rejected / unknown / unusable
+          busy: 'idle',           // 或 busy / congested / unknown
+          rate: '0.11x'           // 或 free / unknown
         }
       }
     }
@@ -87,22 +88,27 @@ ctx.provide('@huai_xin/dsh-workbuddy/state', stateService)
 }
 ```
 
-**字段名是中文，值是卡片上的原文** —— 这是消费方（模型选择器插件）要的契约，不是笔误。
-设计意图：消费方**直接打印**，不用再自备一份翻译表，也不会出现"这边写限流、那边写 limit
-reached"的割裂。
+**键和值都是英文，且与界面语言无关** —— 这是两个 bundle 之间的机器契约，不是给用户看的
+文案。早期版本用词典取值，同一个模型在中文界面是「限流」、英文界面是 `rate limited`，
+消费方一旦按字符串分支，用户换个语言就全线失效。所以：
+
+- 值来自 `SNAPSHOT_VERDICT` / `SNAPSHOT_BUSY` 两张**固定英文表**，不碰 `t()`；
+- **不要**把这几处改回词典查找，`client.mjs` 有一条断言要求它们全是 ASCII 英文；
+- 面板自己的标签该怎么翻译还怎么翻译，两者互不影响。
 
 规则：
 
 - **只发启用的模型**：用户开关就是"这个模型该不该出现在选择器里"的答案，消费方再过滤一次
   只会和面板打架（所以也没有 `enabled` 字段）；
-- **探测结果 = 卡片上的标签**，取值来自 `VERDICT_KEYS`（与 `AVAILABILITY_LABEL` 同源）：
-  `dead`→不可用、`denied`/`blocked`→无权限、`auth`→凭据失效、`noquota`→积分不足、
-  `throttled`→限流、`down`/`error`→未知；**没有标签的**（`ok`、排队 `busy`、从没探测过）→**可用**。
+- **`verdict` 跟卡片上的标签同源**（`SNAPSHOT_VERDICT` 对应 `AVAILABILITY_LABEL`）：
+  `dead`→`unusable`、`denied`/`blocked`→`no permission`、`auth`→`credentials rejected`、
+  `noquota`→`out of credits`、`throttled`→`rate limited`、`down`/`error`→`unknown`；
+  **没有标签的**（`ok`、排队 `busy`、从没探测过）→`available`。
   **按标签映射，不按分组**：5xx 的模型在「可用模型」组里但卡片写的是未知，发布"可用"就是把
   面板没说过的话塞进它嘴里；
-- **繁忙状态**只用大陆版会报；没报就是「未知」（不是空串、不是 `null`）；
-- **倍率、繁忙、探测结果都是给人看的字符串**，不是数字：倍率是 `0.11x`，免费是「免费」，
-  拿不到是「未知」。消费方要排序就自己解析，别指望这里给数值；
+- **`busy`** 只有大陆版会报；没报就是 `unknown`（不是空串、不是 `null`）；
+- **`rate` 是显示用的字符串**：`0.11x`、`free`、`unknown`。消费方要排序就自己解析，别指望
+  这里给数值；
 - **全部 JSON 可序列化**：不要放 `Map`、`Date`、`undefined`、函数、类实例；
 - **路由预设不进 `models`**（`default-model` 之类是别名，不是模型）；
 - **这个服务必须是可选的**：不要加进 `dsh.client.inject` 强制依赖，别人探测不到就退回纯文本。

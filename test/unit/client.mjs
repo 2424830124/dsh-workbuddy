@@ -363,17 +363,18 @@ assert.ok(titlesOf(signedInTree).some((title) => title.startsWith('繁忙程度�
   assert.equal(cn.loggedIn, true)
   assert.equal(typeof cn.credits, 'number', 'the balance travels with the snapshot')
 
-  // Four strings per model, worded exactly as the row words them, so a selector can print
-  // them without owning a second translation table.
+  // Four fields per model. Keys and values are both English, and the values are fixed tokens
+  // rather than dictionary lookups: the same model must report `rate limited` in a Chinese UI
+  // and in an English one, or a consumer branching on the string breaks on a locale switch.
   const hy3 = cn.models.hy3
   assert.ok(hy3 !== undefined, 'a model is keyed by its id')
-  assert.deepEqual(Object.keys(hy3).sort(), ['倍率', '探测结果', '显示名称', '繁忙状态'])
-  assert.equal(hy3.显示名称, 'Hy3')
-  assert.equal(hy3.探测结果, '可用', 'a model nothing is known against reads 可用')
-  assert.equal(hy3.繁忙状态, '繁忙', 'the load label is the row\'s own wording')
-  assert.equal(hy3.倍率, '0.08x', 'and so is the rate')
-  assert.deepEqual(Object.fromEntries(Object.entries(hy3)), {
-    显示名称: 'Hy3', 探测结果: '可用', 繁忙状态: '繁忙', 倍率: '0.08x'
+  assert.deepEqual(Object.keys(hy3).sort(), ['busy', 'name', 'rate', 'verdict'])
+  assert.equal(hy3.name, 'Hy3')
+  assert.equal(hy3.verdict, 'available', 'a model nothing is known against reads available')
+  assert.equal(hy3.busy, 'busy', 'the load level as a token')
+  assert.equal(hy3.rate, '0.08x', 'and the rate as it is displayed')
+  assert.deepEqual({ ...hy3 }, {
+    name: 'Hy3', verdict: 'available', busy: 'busy', rate: '0.08x'
   }, 'and nothing else leaks into the shape')
 
   // The dead model is switched off in the fixture, so it is not published at all: the
@@ -382,32 +383,43 @@ assert.ok(titlesOf(signedInTree).some((title) => title.startsWith('繁忙程度�
   assert.ok(!('default-model' in cn.models), 'router presets are not published as models')
 
   assert.ok(Object.keys(intl.models).length > 0, 'the deployment the panel is NOT showing still publishes its models')
-  assert.equal(intl.models.hy3.显示名称, 'Hy3', 'and carries the same fields')
-  assert.equal(typeof intl.models.hy3.探测结果, 'string')
-  assert.equal(intl.models.hy3.繁忙状态, '未知', 'a deployment without busy levels says so rather than inventing one')
+  assert.equal(intl.models.hy3.name, 'Hy3', 'and carries the same fields')
+  assert.equal(typeof intl.models.hy3.verdict, 'string')
+  assert.equal(intl.models.hy3.busy, 'unknown', 'a deployment without busy levels says so rather than inventing one')
   assert.doesNotThrow(() => JSON.stringify(snapshot), 'the whole snapshot is JSON-serializable')
 
   // The verdict follows the row's *chip*, not the group a row sits in. A model that answered
-  // with a 5xx draws 未知 while still belonging to the usable group; publishing 可用 there
-  // would put a word in the panel's mouth.
+  // with a 5xx draws 未知 while still belonging to the usable group; publishing "available"
+  // there would put a word in the panel's mouth.
   {
     const verdictOf = (model) => {
       const copy = { ...models }
       installFetch({ state: signedInState, models: [{ ...copy[0], availability: { state: model, at: Date.now() } }], busy: {} })
-      return service.refresh().then(() => service.getSnapshot().providers['@huai_xin/dsh-workbuddy/cn'].models.hy3.探测结果)
+      return service.refresh().then(() => service.getSnapshot().providers['@huai_xin/dsh-workbuddy/cn'].models.hy3.verdict)
     }
-    assert.equal(await verdictOf('ok'), '可用')
-    assert.equal(await verdictOf(undefined), '可用', 'an unprobed model draws no chip, so it reads 可用')
-    assert.equal(await verdictOf('busy'), '可用', 'a queue is transient, not a verdict')
-    assert.equal(await verdictOf('down'), '未知', 'a 5xx is undecided, and the row says 未知')
-    assert.equal(await verdictOf('throttled'), '限流')
-    assert.equal(await verdictOf('noquota'), '积分不足')
-    assert.equal(await verdictOf('denied'), '无权限')
-    assert.equal(await verdictOf('auth'), '凭据失效')
-    assert.equal(await verdictOf('dead'), '不可用')
+    assert.equal(await verdictOf('ok'), 'available')
+    assert.equal(await verdictOf(undefined), 'available', 'an unprobed model draws no chip, so it reads available')
+    assert.equal(await verdictOf('busy'), 'available', 'a queue is transient, not a verdict')
+    assert.equal(await verdictOf('down'), 'unknown', 'a 5xx is undecided, and the row says 未知')
+    assert.equal(await verdictOf('throttled'), 'rate limited')
+    assert.equal(await verdictOf('noquota'), 'out of credits')
+    assert.equal(await verdictOf('denied'), 'no permission')
+    assert.equal(await verdictOf('auth'), 'credentials rejected')
+    assert.equal(await verdictOf('dead'), 'unusable')
     // Put the first fixture back for the assertions that follow.
     installFetch({ state: signedInState, models, busy: { hy3: 'busy' } })
     await service.refresh()
+  }
+
+  // The tokens must not come from the dictionary: the panel here runs under zh-CN, so a
+  // lookup would publish 限流 / 空闲 / 免费 and change meaning the moment the UI language did.
+  {
+    const published = service.getSnapshot().providers['@huai_xin/dsh-workbuddy/cn'].models
+    for (const [id, entry] of Object.entries(published)) {
+      assert.match(entry.verdict, /^[a-z ]+$/, `${id}: verdict is a fixed English token`)
+      assert.match(entry.busy, /^[a-z]+$/, `${id}: busy is a fixed English token`)
+      assert.match(entry.rate, /^(?:[\d.]+x|free|unknown)$/, `${id}: rate is a number, free or unknown`)
+    }
   }
 
   // Concurrent callers share one read: the panel's actions and the timer can overlap.

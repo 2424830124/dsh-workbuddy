@@ -103,9 +103,6 @@ window.__ModuleLoader__.load({
         stateNoQuota: '积分不足',
         stateThrottled: '限流',
         stateUnknown: '未知',
-        // The positive verdict, for the published snapshot: the row itself draws no chip
-        // when a model is fine, so this wording exists only for consumers.
-        stateAvailable: '可用',
         detailId: '标识',
         detailContext: '上下文',
         detailMaxOutput: '最大输出',
@@ -681,55 +678,44 @@ window.__ModuleLoader__.load({
     const EMPTY_SNAPSHOT = Object.freeze({ version: 1, updatedAt: 0, providers: {} })
 
     /**
-     * Verdict → dictionary key, mirroring what a row draws as its chip.
+     * The published wording: fixed English, independent of the panel's locale.
      *
-     * The published string is the panel's own wording on purpose: a selector that renders
-     * "限流" here and "limit reached" there would look like two different products, and the
-     * consumer would have to re-derive a verdict the panel already made.
+     * These were dictionary lookups at first, which meant the same model reported "限流" in a
+     * Chinese UI and "rate limited" in an English one — a consumer branching on the string
+     * would break the moment somebody switched language. The snapshot is a machine contract,
+     * so it says one thing always; the panel is free to translate its own labels.
+     *
+     * The mapping mirrors the chip table: the verdict is what the row would draw, and the
+     * states with no chip at all — a clean `ok`, a queue (`busy`), a model never probed —
+     * read `available`.
      */
-    const VERDICT_KEYS = {
-      dead: 'stateDead',
-      denied: 'stateDenied',
-      blocked: 'stateDenied',
-      auth: 'stateAuth',
-      noquota: 'stateNoQuota',
-      throttled: 'stateThrottled',
-      down: 'stateUnknown',
-      error: 'stateUnknown'
+    const SNAPSHOT_VERDICT = {
+      dead: 'unusable',
+      denied: 'no permission',
+      blocked: 'no permission',
+      auth: 'credentials rejected',
+      noquota: 'out of credits',
+      throttled: 'rate limited',
+      down: 'unknown',
+      error: 'unknown'
     }
+    const SNAPSHOT_BUSY = { idle: 'idle', normal: 'idle', busy: 'busy', congested: 'congested' }
 
-    /**
-     * The dictionary `t`, once one exists.
-     *
-     * Snapshots are published after `apply()` has bound it, but the builder is module-level
-     * so the panel's helpers can share it. Before a locale arrives this echoes the key —
-     * which only happens in a host that never registered one.
-     */
-    let translate = (key) => key
-
-    /**
-     * The verdict as the row's chip words it.
-     *
-     * Driven by the chip table rather than by the group: a 5xx or an unparsed body draws
-     * 未知 on the row while still sitting in the usable group, and a consumer copying this
-     * string next to "可用" would be describing something the panel never said. States with
-     * no chip at all — a clean `ok`, a queue (`busy`), a model nothing was probed — read 可用.
-     */
+    /** The verdict the row's chip would show, as a stable token. */
     function verdictText(model) {
-      const key = VERDICT_KEYS[model?.availability?.state]
-      return translate(key ?? 'stateAvailable')
+      return SNAPSHOT_VERDICT[model?.availability?.state] ?? 'available'
     }
 
-    /** The load label as the row words it, 未知 when the deployment reports nothing. */
+    /** The load label as a stable token; `unknown` when the deployment reports nothing. */
     function busyText(level) {
-      if (typeof level !== 'string' || level.length === 0) return translate('unknown')
-      return translate(BUSY_LABEL[level] ?? 'busyUnknown')
+      if (typeof level !== 'string' || level.length === 0) return 'unknown'
+      return SNAPSHOT_BUSY[level] ?? 'unknown'
     }
 
-    /** The rate as the row words it: "0.11x", 免费, or 未知 — never a made-up number. */
+    /** The rate as displayed ("0.11x"), or "free" / "unknown" — never a made-up number. */
     function rateText(model) {
-      if (isFreeModel(model)) return translate('freeModel')
-      return formatRate(model.credits) ?? translate('unknown')
+      if (isFreeModel(model)) return 'free'
+      return formatRate(model.credits) ?? 'unknown'
     }
 
     /**
@@ -740,8 +726,9 @@ window.__ModuleLoader__.load({
      * out — the user's switch is the answer to "should this appear in a picker", so a
      * consumer filtering them again would only risk disagreeing with the panel.
      *
-     * Field names are Chinese because that is the contract this consumer asked for; the
-     * values are whatever the row itself displays, so a selector can print them verbatim.
+     * Field names and values are both English: this is a machine contract between two
+     * bundles, not something a user reads, and a key or a token that changes with the
+     * interface language would break the consumer on a locale switch.
      */
     function buildStateSnapshot(state, modelMap, busyLevels, now = Date.now()) {
       const providers = {}
@@ -752,10 +739,10 @@ window.__ModuleLoader__.load({
           if (model?.preset === true || typeof model?.id !== 'string') continue
           if (model.enabled === false) continue
           models[model.id] = {
-            显示名称: model.name ?? model.id,
-            探测结果: verdictText(model),
-            繁忙状态: busyText(busyLevels?.[region.id]?.[model.id]),
-            倍率: rateText(model)
+            name: model.name ?? model.id,
+            verdict: verdictText(model),
+            busy: busyText(busyLevels?.[region.id]?.[model.id]),
+            rate: rateText(model)
           }
         }
         const credits = region.credits
@@ -1876,9 +1863,6 @@ window.__ModuleLoader__.load({
             const local = localise(currentLocale, key)
             return local === undefined ? key : local
           }
-          // The published snapshot words its verdicts and rates through the same dictionary
-          // the rows use, so a consumer never has to keep a second translation table.
-          translate = t
 
           if (locale !== undefined && typeof locale.register === 'function' && typeof locale.getLocale === 'function') {
             const registered = []
