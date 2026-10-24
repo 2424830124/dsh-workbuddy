@@ -93,9 +93,16 @@ async function readJsonBody(req) {
   }
 }
 
+/**
+ * The account table's payload.
+ *
+ * The two deployments are read **in parallel**: each side costs a credits call and a
+ * check-in call, and doing them in sequence made every `/state` as slow as the sum of four
+ * round trips (346 ms measured) — which the panel feels on every action, and a model switch
+ * does not even need this payload.
+ */
 async function statePayload(ctx, adapters) {
-  const regions = []
-  for (const id of REGION_IDS) {
+  const regions = await Promise.all(REGION_IDS.map(async (id) => {
     const region = REGIONS[id]
     const status = await regionStatus(ctx, region)
     const meta = await readMeta(ctx, region)
@@ -123,7 +130,7 @@ async function statePayload(ctx, adapters) {
       credits = creditResult
       checkin = checkinResult
     }
-    regions.push({
+    return {
       id,
       label: region.label,
       provider: region.provider,
@@ -140,8 +147,8 @@ async function statePayload(ctx, adapters) {
       credits: credits ?? null,
       checkin: checkin ?? null,
       lastClaim: typeof meta?.checkin === 'object' && meta.checkin !== null ? meta.checkin : null
-    })
-  }
+    }
+  }))
   return { regions }
 }
 

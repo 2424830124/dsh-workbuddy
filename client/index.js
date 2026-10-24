@@ -792,6 +792,12 @@ window.__ModuleLoader__.load({
       const listeners = new Set()
       /** @type {Promise<void> | undefined} */
       let inFlight
+      // The inputs of the last publication, kept so a model switch can be reflected without
+      // another round trip: the display fields (name, verdict, busy, rate) have not changed,
+      // only which ids are in the map.
+      let lastState
+      let lastModelMap
+      let lastBusyLevels
 
       /**
        * Read both deployments and publish.
@@ -819,6 +825,9 @@ window.__ModuleLoader__.load({
           modelMap[region.id] = { list: models?.models ?? [] }
           if (busy?.levels !== undefined) busyLevels[region.id] = busy.levels
         }))
+        lastState = state
+        lastModelMap = modelMap
+        lastBusyLevels = busyLevels
         service.publish(buildStateSnapshot(state, modelMap, busyLevels))
       }
 
@@ -846,6 +855,26 @@ window.__ModuleLoader__.load({
           const task = load().finally(() => { inFlight = undefined })
           inFlight = task
           return task
+        },
+        /**
+         * Reflect a model switch without re-reading anything.
+         *
+         * The published map only contains enabled models, so flipping one switch adds or
+         * removes an entry — but its display values are already known. Re-reading to learn
+         * that costs two upstream round trips per deployment and was felt as a hitch on
+         * every click. Falls back to a full refresh when nothing has been published yet.
+         */
+        patchEnabled(regionId, ids, enabled) {
+          if (lastModelMap?.[regionId]?.list === undefined) {
+            void this.refresh().catch(() => undefined)
+            return
+          }
+          const wanted = new Set(ids.map(String))
+          const list = lastModelMap[regionId].list.map((model) => (
+            wanted.has(String(model.id)) ? { ...model, enabled, decided: true } : model
+          ))
+          lastModelMap = { ...lastModelMap, [regionId]: { ...lastModelMap[regionId], list } }
+          this.publish(buildStateSnapshot(lastState, lastModelMap, lastBusyLevels))
         },
         async refreshCredits(region) {
           const id = regionIdOf(region)
@@ -1025,7 +1054,11 @@ window.__ModuleLoader__.load({
       // only re-runs when the region id, the login state or the model count changes, so
       // clearing on an unrelated action left the table on its loading skeleton until the
       // panel was reopened.
-      const CLEARS_MODELS = new Set(['/enabled', '/import', '/login', '/logout', '/models'])
+      //
+      // `/enabled` is deliberately absent: flipping one switch does not change the list, and
+      // clearing it here re-fetched the catalog over a list that had not changed. The
+      // response to that request is applied in place instead (see below).
+      const CLEARS_MODELS = new Set(['/import', '/login', '/logout', '/models'])
 
       const act = async (key, path, body) => {
         setBusy(key)
@@ -1036,7 +1069,15 @@ window.__ModuleLoader__.load({
             setLoginUrls((current) => ({ ...current, [body.region]: result.url }))
           }
           if (body?.region !== undefined && CLEARS_MODELS.has(path)) setModelMap((current) => ({ ...current, [body.region]: undefined }))
-          await load()
+          if (path === '/enabled' && body?.reset !== true && Array.isArray(body?.ids)) {
+            // The switch only changed a boolean per id, and `/state` costs two upstream
+            // round trips per deployment (credits + check-in) — measured at 346 ms, felt as
+            // a hitch on every click. Patch the row we already have and tell the state
+            // service the same thing.
+            applyEnabledLocally(body.region, body.ids, body.enabled !== false)
+          } else {
+            await load()
+          }
           // The host reports a failed write instead of throwing, so an unchecked
           // `saved: false` reads as success and the user keeps a setting that was never
           // stored.
@@ -1058,10 +1099,13 @@ window.__ModuleLoader__.load({
           setError(cause instanceof Error ? cause.message : String(cause))
           return undefined
         } finally {
-          // Whatever happened — a switch flipped, a login started, a name imported — the
+          // Whatever happened — a login started, a name imported, credits re-read — the
           // published snapshot is now stale, and a selector reading it has no other way to
-          // find out. Fire and forget: a failure here must not surface as the action's own.
-          void stateService.refresh().catch(() => undefined)
+          // find out. A switch is the exception: it was patched in place above, and a full
+          // re-read costs two upstream round trips for nothing.
+          if (!(path === '/enabled' && body?.reset !== true)) {
+            void stateService.refresh().catch(() => undefined)
+          }
           setBusy('')
         }
       }
@@ -1239,15 +1283,49 @@ window.__ModuleLoader__.load({
       }
 
       /** Turn one model, a group, or every row on/off; `reset` returns to the verdict default. */
+      /**
+       * Flip one or more switches.
+       *
+       * The request is the whole job: it returns which ids were affected, and the row we
+       * already hold knows everything else about them. Re-reading `/models` and `/state`
+       * afterwards is what made a click feel sticky — `/state` alone costs two upstream round
+       * trips per deployment (credits and check-in, 346 ms measured) and answers a question
+       * no switch asks.
+       *
+       * `reset` is the exception: it moves every id back to its verdict default, so the
+       * affected set is the whole list and only the host knows the outcome.
+       */
       const setModelsEnabled = async (regionId, ids, enabled, reset = false) => {
         if (ids.length === 0) return
         setBusy(`enabled:${regionId}`)
         setError('')
         try {
-          await request('/enabled', { method: 'POST', body: JSON.stringify({ region: regionId, ids, enabled, reset }) })
-          const result = await request(`/models?region=${encodeURIComponent(regionId)}`)
-          setModelMap((current) => ({ ...current, [regionId]: modelMeta(result) }))
-          await load()
+          const result = await request('/enabled', { method: 'POST', body: JSON.stringify({ region: regionId, ids, enabled, reset }) })
+          // The host reports a failed write instead of throwing; an unchecked `saved: false`
+          // reads as success and leaves the user holding a setting that was never stored.
+          if (result?.saved === false) {
+            setError(result.message ?? t('saveFailed'))
+            return
+          }
+          if (reset === true) {
+            const models = await request(`/models?region=${encodeURIComponent(regionId)}`)
+            setModelMap((current) => ({ ...current, [regionId]: modelMeta(models) }))
+            await load()
+            return
+          }
+          const wanted = new Set(ids.map(String))
+          setModelMap((current) => {
+            const entry = current[regionId]
+            if (entry?.list === undefined) return current
+            return {
+              ...current,
+              [regionId]: {
+                ...entry,
+                list: entry.list.map((model) => (wanted.has(String(model.id)) ? { ...model, enabled, decided: true } : model))
+              }
+            }
+          })
+          stateService.patchEnabled(regionId, ids, enabled)
         } catch (cause) {
           setError(cause instanceof Error ? cause.message : String(cause))
         } finally {

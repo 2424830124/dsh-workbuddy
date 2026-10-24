@@ -448,6 +448,39 @@ const hasClass = (node, name) => String(node.props?.className ?? '').split(/\s+/
   assert.ok(rowText(alive).includes('繁忙'), 'and its busy level')
 }
 
+// A model switch must cost one request.
+//
+// `/state` answers with the balance and check-in state, which costs two upstream round trips
+// per deployment — 346 ms measured — and the click felt it because the panel used to re-read
+// the whole state (and the catalog) to learn one boolean.
+{
+  const calls = installFetch({ state: signedInState, models, busy: { hy3: 'busy' } })
+  const tree = await renderPanel()
+  const switchOf = (name) => {
+    const rows = nodesOf(tree).filter((node) => hasClass(node, 'wb-model'))
+    const row = rows.find((node) => textsOf(node).join('|').includes(name))
+    assert.ok(row !== undefined, `the ${name} row renders`)
+    return nodesOf(row).find((node) => node.props?.role === 'switch')
+  }
+  const hy3Switch = switchOf('Hy3')
+  assert.ok(hy3Switch !== undefined, 'the row carries a switch')
+
+  calls.length = 0
+  hy3Switch.props.onClick({ stopPropagation: () => {} })
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  const afterToggle = calls.map((url) => String(url).replace(/^.*\/workbuddy/, ''))
+
+  assert.ok(afterToggle.some((path) => path.startsWith('/enabled')), 'the switch calls /enabled')
+  assert.ok(!afterToggle.some((path) => path.startsWith('/state')), 'and does NOT re-read /state')
+  assert.ok(!afterToggle.some((path) => path.startsWith('/models')), 'and does NOT re-read the catalog')
+
+  // The snapshot follows the switch without a round trip: the model leaves the map, because
+  // only enabled models are published.
+  const service = provided.get('@huai_xin/dsh-workbuddy/state')
+  assert.ok(!('hy3' in service.getSnapshot().providers['@huai_xin/dsh-workbuddy/cn'].models),
+    'disabling a model drops it from the snapshot')
+}
+
 const accountCard = nodesOf(signedInTree).find((node) => hasClass(node, 'wb-account-card'))
 assert.ok(accountCard, 'the account card has its own styling scope')
 const accountNodes = nodesOf(accountCard)
