@@ -1110,7 +1110,16 @@ window.__ModuleLoader__.load({
         return h('div', { className: 'wb-model-detail' }, rows)
       }
 
-      const modelRow = (model, regionId) => {
+      /**
+       * One model row.
+       *
+       * `compact` drops the promotion and busy tags. The unusable group uses it: those
+       * models cannot be called, so what they cost or how loaded they are is noise — and the
+       * row already carries a verdict chip, a rate and a switch, which is what overflowed.
+       * Both values remain in the expandable details.
+       */
+      const modelRow = (model, regionId, options = {}) => {
+        const compact = options.compact === true
         const key = `${regionId}:${model.id}`
         const open = expanded[key] === true
         return h('div', { key: model.id, className: open ? 'wb-model-block wb-model-block-open' : 'wb-model-block' },
@@ -1136,20 +1145,20 @@ window.__ModuleLoader__.load({
           h('span', { className: 'wb-model-name' }, model.name ?? model.id),
           // The right-hand cluster reads as one block: what it costs (promotion),
           // how loaded it is, the rate itself — then the switch, which is the only
-          // control in the row.
+          // control in the row. A compact row keeps only the verdict and the rate.
           h('span', { className: 'wb-model-tail' },
             availabilityChip(model.availability, t),
-            model.promotion === undefined ? null : promotionTag(model.promotion, t),
-            model.busyKnown !== true
-              ? null
-              : tag([
+            (!compact && model.promotion !== undefined) ? promotionTag(model.promotion, t) : null,
+            (!compact && model.busyKnown === true)
+              ? tag([
                 h('span', { className: 'wb-tag-dot', key: 'dot' }),
                 busyLabel(model.busy, t)
               ], `wb-busy-column ${busyTone(model.busy)}`, {
                 key: 'busy',
                 // The tooltip keeps the official phrasing (轻微拥堵 / 极度拥堵).
                 title: busyTitle(model.busy, t)
-              }),
+              })
+              : null,
             h('span', { className: 'wb-model-rate', title: t('creditsRate') },
               model.credits === undefined
                 ? h('span', { className: 'wb-muted' }, t('unknown'))
@@ -1188,7 +1197,7 @@ window.__ModuleLoader__.load({
           h('span', null, label),
           h('span', { className: 'wb-group-count' }, String(list.length))
           ),
-          collapsed === true ? null : list.map((model) => modelRow(model, regionId))
+          collapsed === true ? null : list.map((model) => modelRow(model, regionId, { compact: key === 'unusable' }))
         )
       })()
 

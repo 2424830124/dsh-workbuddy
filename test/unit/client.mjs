@@ -254,6 +254,10 @@ const models = [
     credits: undefined,
     efforts: [],
     input: ['text'],
+    // A dead model that still carries a promotion and a busy level: the unusable group must
+    // render neither on the row (they are noise for something that cannot be called, and the
+    // three tags overflowed), while the details keep both.
+    promotion: { label: '夜间折扣', color: '#d89614', kind: 'discount', text: 'nightly discount' },
     availability: { state: 'dead', detail: '模型不存在', at: Date.now() },
     enabled: false,
     decided: false
@@ -319,6 +323,29 @@ const nodesOf = (node, out = []) => {
   return out
 }
 const hasClass = (node, name) => String(node.props?.className ?? '').split(/\s+/).includes(name)
+
+// The 不可用 group keeps only the verdict and the rate on the row: a dead model's promotion
+// and busy level are noise for something that cannot be called, and three tags plus a rate
+// and a switch had no width left. Both stay in the expandable details.
+//
+// The group starts folded, so open it first; state lives in the hook slots, so the second
+// render picks up where this one left off.
+{
+  const rowText = (node) => textsOf(node).join('|')
+  const groupHead = nodesOf(signedInTree)
+    .find((node) => hasClass(node, 'wb-group-head') && rowText(node).includes('不可用'))
+  assert.ok(groupHead !== undefined, 'the unusable group has a header')
+  groupHead.props.onClick()
+  const unfolded = await renderPanel()
+  const rows = nodesOf(unfolded).filter((node) => hasClass(node, 'wb-model'))
+  const dead = rows.find((node) => rowText(node).includes('GLM-5.0'))
+  const alive = rows.find((node) => rowText(node).includes('Hy3'))
+  assert.ok(dead !== undefined && alive !== undefined, 'both rows render once the group is open')
+  assert.ok(!rowText(dead).includes('夜间折扣'), 'the unusable row drops the promotion tag')
+  assert.ok(rowText(alive).includes('Free now'), 'the usable row keeps its promotion')
+  assert.ok(rowText(alive).includes('繁忙'), 'and its busy level')
+}
+
 const accountCard = nodesOf(signedInTree).find((node) => hasClass(node, 'wb-account-card'))
 assert.ok(accountCard, 'the account card has its own styling scope')
 const accountNodes = nodesOf(accountCard)

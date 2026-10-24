@@ -107,7 +107,13 @@ assert.equal(fallback.source, 'config')
 assert.deepEqual(fallback.entries.map((entry) => entry.id), ['hy3', 'gpt-5.6-sol'])
 assert.ok(fallback.entries.every((entry) => entry.official === undefined), 'nothing from a deployment list is called official')
 assert.match(fallback.reasons[0], /models HTTP 500/)
-assert.equal(calls.length, 2)
+// Both catalog endpoints are asked exactly once. Counting every call would also count the
+// token refresh that now runs first (see `freshToken`), which says nothing about the
+// catalog — so count per endpoint.
+const catalogCalls = calls.filter((target) => target.includes('/personal/models') || target.includes('/v3/config'))
+assert.equal(catalogCalls.length, 2)
+assert.equal(catalogCalls.filter((target) => target.includes('/personal/models')).length, 1, 'scoped is asked once')
+assert.equal(catalogCalls.filter((target) => target.includes('/v3/config')).length, 1, 'config is asked once')
 
 // Scoped answers → it defines the list, and config fills in what scoped left
 // blank (here: hy3's level set, which the real scoped payload omits).
