@@ -3,8 +3,8 @@
  *
  * Registers one llm provider route per WorkBuddy deployment:
  *
- *   workbuddy-intl → https://www.workbuddy.ai  (login platform: workbuddy-ai)
- *   workbuddy-cn   → https://www.workbuddy.cn  (login platform: workbuddy)
+ *   @huai_xin/dsh-workbuddy/intl → https://www.workbuddy.ai  (login platform: workbuddy-ai)
+ *   @huai_xin/dsh-workbuddy/cn   → https://www.workbuddy.cn  (login platform: workbuddy)
  *
  * and the `/workbuddy` command that signs each one in, reports status, rotates
  * tokens, and lists the live account catalog. `auth.js` owns the plugin login
@@ -325,5 +325,5 @@ export function apply(ctx) {
     clearTimeout(midnightTimer)
   }, 'dsh-workbuddy: token refresh and check-in timers')
 
-  ctx.logger.info(`[workbuddy] 已注册 provider：workbuddy-intl、workbuddy-cn；请运行 /workbuddy login 授权（实例 ${instance}）`)
+  ctx.logger.info(`[workbuddy] 已注册 provider：${REGION_IDS.map((id) => REGIONS[id].provider).join('、')}；请运行 /workbuddy login 授权（实例 ${instance}）`)
 }

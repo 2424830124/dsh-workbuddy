@@ -83,7 +83,7 @@ for (const size of sizes) {
     const started = Date.now()
     try {
       for await (const chunk of adapter.stream({
-        provider: 'workbuddy-intl',
+        provider: '@huai_xin/dsh-workbuddy/intl',
         model,
         system: '你是动手型编程助手：需要改文件时直接调用工具，不要先叙述。',
         messages,

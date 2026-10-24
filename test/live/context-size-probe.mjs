@@ -53,7 +53,7 @@ for (const size of targets) {
   let usage
   try {
     for await (const chunk of adapter.stream({
-      provider: 'workbuddy-intl',
+      provider: '@huai_xin/dsh-workbuddy/intl',
       model: 'deepseek-v4.1-flash',
       system: '你是助手。',
       messages,

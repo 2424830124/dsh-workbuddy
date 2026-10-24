@@ -501,6 +501,15 @@ window.__ModuleLoader__.load({
       return factor === null ? credits : `${factor[1]}x`
     }
     /**
+     * The same factor as a number, for consumers that do arithmetic instead of printing.
+     * `null` when the catalog published no rate — the snapshot says "unknown", not "free".
+     */
+    const numericRate = (credits) => {
+      if (typeof credits !== 'string') return null
+      const factor = /(\d+(?:\.\d+)?)/.exec(credits)
+      return factor === null ? null : Number.parseFloat(factor[1])
+    }
+    /**
      * A zero rate reads as 「免费」 rather than 「0.00x」: that is the panel's own
      * vocabulary, and it is what the promotion block is advertising anyway.
      */
@@ -649,6 +658,122 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Verdicts that mean "the account cannot call this right now", and so belong in the
+     * unusable group. Shared with the state service so a selector plugin grouping by the
+     * same rule never disagrees with what this panel shows.
+     */
+    const UNUSABLE_STATES = new Set(['dead', 'denied', 'blocked', 'auth', 'noquota', 'throttled'])
+    const isUnusable = (entry) => UNUSABLE_STATES.has(entry?.availability?.state)
+
+    /**
+     * The observable this plugin publishes for other client plugins.
+     *
+     * Name-scoped, because a selector plugin and this panel are separate bundles and a bare
+     * name would collide. Shaped like the host's own observables (`directory`, `locale`):
+     * `getSnapshot()` returns the *same* reference until something changes, which is what
+     * `useSyncExternalStore` requires, and `subscribe()` hands back an unsubscribe.
+     *
+     * Everything in a snapshot is JSON-serializable and never throws: a consumer reading it
+     * before the panel has loaded gets an empty map, not an exception.
+     */
+    const STATE_SERVICE = '@huai_xin/dsh-workbuddy/state'
+    const EMPTY_SNAPSHOT = Object.freeze({ version: 1, updatedAt: 0, providers: {} })
+
+    /**
+     * Derive the published map from what the panel already holds.
+     *
+     * Only what a consumer would act on: whether the deployment is signed in, its balance,
+     * and per model the name, the switch state, the probe verdict, the busy level and the
+     * live rate. Presets are skipped — they are router aliases, not models.
+     */
+    function buildStateSnapshot(state, modelMap, busyLevels, now = Date.now()) {
+      const providers = {}
+      for (const region of state?.regions ?? []) {
+        if (typeof region?.provider !== 'string' || region.provider.length === 0) continue
+        const models = {}
+        for (const model of modelMap?.[region.id]?.list ?? []) {
+          if (model?.preset === true || typeof model?.id !== 'string') continue
+          models[model.id] = {
+            name: model.name ?? model.id,
+            enabled: model.enabled !== false,
+            available: !isUnusable(model),
+            busy: busyLevels?.[region.id]?.[model.id] ?? null,
+            rate: numericRate(model.credits)
+          }
+        }
+        const credits = region.credits
+        providers[region.provider] = {
+          region: region.id,
+          provider: region.provider,
+          displayName: region.label ?? region.provider,
+          loggedIn: region.loggedIn === true,
+          pending: region.pending === true,
+          credits: typeof credits?.total === 'number' ? credits.total : null,
+          models
+        }
+      }
+      return { version: 1, updatedAt: now, providers }
+    }
+
+    /** Accepts `cn`, `intl`, or a full provider id, and returns the deployment id. */
+    function regionIdOf(region) {
+      const value = String(region ?? '').trim()
+      if (value.length === 0) return undefined
+      for (const entry of PLACEHOLDER_REGIONS) {
+        if (entry.id === value || entry.provider === value) return entry.id
+      }
+      return undefined
+    }
+
+    /**
+     * The service object itself. Actions talk to the same host routes the panel uses, so a
+     * consumer never needs to know about `/workbuddy/*`; they return the host's answer and
+     * the panel picks the new state up on its next read.
+     */
+    function createStateService() {
+      let snapshot = EMPTY_SNAPSHOT
+      const listeners = new Set()
+      return {
+        getSnapshot: () => snapshot,
+        subscribe(listener) {
+          if (typeof listener !== 'function') return () => {}
+          listeners.add(listener)
+          return () => { listeners.delete(listener) }
+        },
+        /** @internal — the panel pushes what it loaded. */
+        publish(next) {
+          snapshot = next
+          for (const listener of [...listeners]) {
+            // A consumer's bug must not break the panel it is decorating.
+            try { listener(snapshot) } catch { /* ignore */ }
+          }
+        },
+        async refreshCredits(region) {
+          const id = regionIdOf(region)
+          if (id === undefined) throw new Error(`unknown region: ${region}`)
+          const result = await request(`/credits?region=${encodeURIComponent(id)}`)
+          return result?.credits ?? null
+        },
+        async login(region) {
+          const id = regionIdOf(region)
+          if (id === undefined) throw new Error(`unknown region: ${region}`)
+          return request('/login', { method: 'POST', body: JSON.stringify({ region: id }) })
+        },
+        async renew(region) {
+          const ids = region === undefined ? PLACEHOLDER_REGIONS.map((entry) => entry.id) : [regionIdOf(region)]
+          if (ids.some((id) => id === undefined)) throw new Error(`unknown region: ${region}`)
+          const results = []
+          for (const id of ids) {
+            results.push(await request('/refresh', { method: 'POST', body: JSON.stringify({ region: id }) }))
+          }
+          return results
+        }
+      }
+    }
+
+    const stateService = createStateService()
+
+    /**
      * Which tab to open: the first signed-in deployment in display order — the
      * mainland one comes first — so the panel opens on the same side the tab
      * strip starts on and the tab never moves once `/state` answers.
@@ -668,8 +793,8 @@ window.__ModuleLoader__.load({
      * the real state arrived.
      */
     const PLACEHOLDER_REGIONS = [
-      { id: 'cn', provider: 'workbuddy-cn', endpoint: 'https://www.workbuddy.cn', loggedIn: false, pending: false, nickname: '', expiresAt: 0, refreshable: false, models: 0, credits: null, checkin: null, lastClaim: null },
-      { id: 'intl', provider: 'workbuddy-intl', endpoint: 'https://www.workbuddy.ai', loggedIn: false, pending: false, nickname: '', expiresAt: 0, refreshable: false, models: 0, credits: null, checkin: null, lastClaim: null }
+      { id: 'cn', provider: '@huai_xin/dsh-workbuddy/cn', endpoint: 'https://www.workbuddy.cn', loggedIn: false, pending: false, nickname: '', expiresAt: 0, refreshable: false, models: 0, credits: null, checkin: null, lastClaim: null },
+      { id: 'intl', provider: '@huai_xin/dsh-workbuddy/intl', endpoint: 'https://www.workbuddy.ai', loggedIn: false, pending: false, nickname: '', expiresAt: 0, refreshable: false, models: 0, credits: null, checkin: null, lastClaim: null }
     ]
 
     function WorkBuddySettings({ t }) {
@@ -775,6 +900,17 @@ window.__ModuleLoader__.load({
           .then((result) => setModelMap((current) => ({ ...current, [id]: modelMeta(result) })))
           .catch((cause) => setModelMap((current) => ({ ...current, [id]: { error: cause instanceof Error ? cause.message : String(cause) } })))
       }, [region?.id, region?.loggedIn, modelCount])
+
+      /**
+       * Publish what the panel knows, for other client plugins.
+       *
+       * An effect rather than the render body: publishing notifies subscribers, and doing
+       * that mid-render is how a consumer's setState lands in the middle of ours. The deps
+       * are the three inputs `buildStateSnapshot` reads, so the snapshot follows the data.
+       */
+      React.useEffect(() => {
+        stateService.publish(buildStateSnapshot(state, modelMap, busyLevels))
+      }, [state, modelMap, busyLevels])
 
       // Actions that can change which models exist. Anything else (credits refresh,
       // check-in, availability probe) must not drop the cached list: the models effect
@@ -956,13 +1092,10 @@ window.__ModuleLoader__.load({
        * 可用 when a later probe finds them answering — the verdicts expire on their own.
        *
        * Only genuinely undecided states (a 5xx, an unparsed body) stay in 可用 with a grey
-       * chip: nothing has been proven about them either way.
+       * chip: nothing has been proven about them either way. The rule itself lives at module
+       * scope (`isUnusable`) so the published snapshot groups identically.
        */
-      const unusableState = (model) => {
-        const state = model.availability?.state
-        return state === 'dead' || state === 'denied' || state === 'blocked' ||
-          state === 'auth' || state === 'noquota' || state === 'throttled'
-      }
+      const unusableState = (model) => isUnusable(model)
       const presets = rows.filter((model) => model.preset === true)
       // Everything the bulk buttons may act on: real models, not router presets.
       const usableRows = rows.filter((model) => model.preset !== true)
@@ -1572,6 +1705,23 @@ window.__ModuleLoader__.load({
             order: 16,
             label: () => t('section')
           }, (props) => h(WorkBuddySettings, { ...props, t })))
+
+          // Optional integration surface for a selector-style plugin: the enabled models,
+          // their busy level and rate, plus the account's login state and balance, with
+          // actions for the two things a selector may want to offer (refresh, renew).
+          //
+          // Provided rather than injected: nobody has to know about it, and a composition
+          // without this plugin's panel is unaffected. A consumer reaches it with
+          // `ctx.get('@huai_xin/dsh-workbuddy/state')` or by listing it in its `inject`.
+          if (typeof ctx.provide === 'function') {
+            try {
+              ctx.provide(STATE_SERVICE, stateService)
+              report('state-service-provided')
+            } catch (failure) {
+              // An older host without services: the panel works, the integration does not.
+              report(`state-service-failed: ${failure instanceof Error ? failure.message : String(failure)}`)
+            }
+          }
           report('applied')
         } catch (failure) {
           report(`apply-failed: ${failure instanceof Error ? failure.message : String(failure)}`)

@@ -94,7 +94,7 @@ assert.equal(apiRoutes.length, 1)
 assert.equal(apiRoutes[0].path, '/workbuddy')
 assert.equal(registrations.length, 2, 'expected two provider routes')
 const providers = registrations.flatMap((entry) => entry.providers).sort()
-assert.deepEqual(providers, ['workbuddy-cn', 'workbuddy-intl'])
+assert.deepEqual(providers, ['@huai_xin/dsh-workbuddy/cn', '@huai_xin/dsh-workbuddy/intl'])
 assert.equal(commands.length, 1)
 assert.equal(commands[0].name, 'workbuddy')
 
@@ -108,7 +108,7 @@ ctx.logger.warn = (...args) => { logged.push(args.join(' ')) }
 retrySub.listener({}, {
   type: 'llm/retry',
   data: {
-    provider: 'workbuddy-intl',
+    provider: '@huai_xin/dsh-workbuddy/intl',
     retry: 2,
     maxRetries: 5,
     delayMs: 2100,

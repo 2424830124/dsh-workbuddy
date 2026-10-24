@@ -35,15 +35,15 @@ const model = process.argv[2] ?? 'deepseek-v4.1-flash'
 const adapter = new WorkBuddyAdapter(ctx, REGIONS.cn)
 console.log('chat route:', adapter.routes()[0].endpoint, '| model:', model)
 
-const models = await adapter.listModels('workbuddy-cn')
+const models = await adapter.listModels('@huai_xin/dsh-workbuddy/cn')
 console.log('listModels:', models.length, '->', models.slice(0, 6).map((entry) => entry.id).join(', '))
 
-const resolved = await adapter.resolveModel('workbuddy-cn', model)
+const resolved = await adapter.resolveModel('@huai_xin/dsh-workbuddy/cn', model)
 console.log('resolveModel:', JSON.stringify(resolved))
 
 const chunks = []
 for await (const chunk of adapter.stream({
-  provider: 'workbuddy-cn',
+  provider: '@huai_xin/dsh-workbuddy/cn',
   model,
   system: 'You are a helpful assistant.',
   messages: [{ role: 'user', content: [{ type: 'text', text: 'One word: is 1+1 equal to 2?' }] }],
@@ -62,7 +62,7 @@ console.log('chunk types:', [...new Set(chunks.map((chunk) => chunk.type))].join
 // Second pass: tool-call parsing, the part the agent loop depends on.
 const toolChunks = []
 for await (const chunk of adapter.stream({
-  provider: 'workbuddy-cn',
+  provider: '@huai_xin/dsh-workbuddy/cn',
   model,
   system: 'You are a helpful assistant. Call the get_weather tool whenever weather is asked about.',
   messages: [{ role: 'user', content: [{ type: 'text', text: 'What is the weather in Beijing? Use the tool.' }] }],

@@ -9,8 +9,8 @@
 
 | Provider 路由    | 部署                      |
 | ---------------- | ------------------------- |
-| `workbuddy-cn`   | https://www.workbuddy.cn  |
-| `workbuddy-intl` | https://www.workbuddy.ai  |
+| `@huai_xin/dsh-workbuddy/cn`   | https://www.workbuddy.cn  |
+| `@huai_xin/dsh-workbuddy/intl` | https://www.workbuddy.ai  |
 
 > **非官方项目。** 与腾讯 / WorkBuddy 官方无任何关联，不使用其商标授权，也不分发其代码。
 > 它只是一个第三方客户端插件，按公开可观测的接口工作。请自行确认使用方式符合你所在地区的

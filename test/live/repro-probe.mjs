@@ -51,7 +51,7 @@ for (const name of readdirSync(dir).filter((entry) => entry.endsWith('.zstd')).s
     try { events.push(JSON.parse(line)) } catch { /* torn */ }
   }
 }
-const header = [...events].reverse().find((event) => event.type === 'request/header' && event.data?.header?.config?.provider === 'workbuddy-intl')
+const header = [...events].reverse().find((event) => event.type === 'request/header' && event.data?.header?.config?.provider === '@huai_xin/dsh-workbuddy/intl')
 const realTools = header?.data?.header?.tools ?? []
 // Tools arrive in OpenAI shape: { type:'function', function:{ name, … } }.
 const nameOf = (tool) => tool?.function?.name ?? tool?.name
@@ -109,7 +109,7 @@ for (const variant of variants) {
     let toolBlocks = 0
     try {
       for await (const chunk of adapter.stream({
-        provider: 'workbuddy-intl',
+        provider: '@huai_xin/dsh-workbuddy/intl',
         model,
         system: '你是一个编程助手。',
         messages,
@@ -128,7 +128,7 @@ for (const variant of variants) {
       continue
     }
     const raw = diagnostics?.stopReason ?? '?'
-    const who = `${diagnostics?.provider ?? 'workbuddy-intl'}/${diagnostics?.model ?? model}`
+    const who = `${diagnostics?.provider ?? '@huai_xin/dsh-workbuddy/intl'}/${diagnostics?.model ?? model}`
     if (finish?.kind === 'tool-calls' || toolBlocks > 0) { calls += 1; rows.push(`call[${raw}] <${who}>`) }
     else if (finish?.kind === 'stop') { stops += 1; rows.push(`STOP[${raw}] <${who}>「${text.slice(0, 22)}」`) }
     else rows.push(`${finish?.kind}[${raw}] <${who}>`)

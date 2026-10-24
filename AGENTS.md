@@ -5,11 +5,101 @@
 ## 这是什么
 
 `@huai_xin/dsh-workbuddy` 是 DeepSeek Harness（DSH）的一个插件：把 **WorkBuddy** 的两个部署
-（`workbuddy-intl` 海外版 / `workbuddy-cn` 大陆版）注册成 llm provider 路由，并提供一个
+（`@huai_xin/dsh-workbuddy/intl` 海外版 / `@huai_xin/dsh-workbuddy/cn` 大陆版）注册成 llm provider 路由，并提供一个
 设置面板管理账号、模型开关与可用性。
 
 - 上游接口、字段、错误码、实测记录：[`docs/workbuddy-protocol.md`](docs/workbuddy-protocol.md)（排查问题先看它）
 - 使用者视角的说明：[`README.md`](README.md)
+
+## Provider id 与客户端服务（给别的插件用的接口）
+
+两件事都是**对外契约**，改名就等于破坏兼容，改之前先看清楚。
+
+### provider id 是带包名的完整路径
+
+```
+@huai_xin/dsh-workbuddy/cn     大陆版
+@huai_xin/dsh-workbuddy/intl   海外版
+```
+
+**硬约束**：`adapter.providerInfo(provider).id` 必须与被注册的 provider 字符串**完全相等**，
+`dsh-llm` 在注册时校验，不等就抛 `INVALID_ADAPTER`。这里的实现直接 `return { id: provider }`，
+所以只有 `REGIONS[].provider` 一个地方能写错。
+
+改名的影响面（当初从 `workbuddy-cn` / `workbuddy-intl` 改成现在这套时踩过的）：
+
+- `REGIONS[].provider`、客户端 `PLACEHOLDER_REGIONS[].provider`、测试与探针里的字面量；
+- **会话里存的 `current: { provider, model }` 用的还是旧 id** —— 改名后旧会话的模型选择
+  回落到默认模型。这是破坏性改动，发版要按 minor 以上走；
+- 用户自定义 provider 或别的插件撞了同一个 id，`registerAdapter` 会抛
+  `DUPLICATE_ADAPTER`，并且是 **all-or-nothing**：一次 `apply()` 里两个部署必须都注册成功，
+  有一个撞了就**整个插件挂掉**（provider、命令、面板路由全没有，面板 404）。
+
+### 客户端服务 `@huai_xin/dsh-workbuddy/state`
+
+给**浏览器侧的模型选择器插件**读的。它读不到宿主服务，只能读客户端服务，所以这个接口
+必须由 `client/index.js` 提供：
+
+```js
+ctx.provide('@huai_xin/dsh-workbuddy/state', stateService)
+```
+
+**名字带 `/`，所以只能 `ctx.get('@huai_xin/dsh-workbuddy/state')` 或写进 `inject: [...]`，
+点号访问不了。** 这是正常写法，不是拼错。
+
+形状照 DSH 自己的 observable（`directory` / `locale` 一致）：
+
+| 成员 | 说明 |
+| --- | --- |
+| `getSnapshot()` | 同一份数据期间返回**同一引用**（喂 `useSyncExternalStore` 的前提）；没数据时返回空 `providers`，**永不抛错** |
+| `subscribe(fn)` | 返回取消订阅函数 |
+| `refreshCredits(region)` | 调宿主 `/workbuddy/credits`，返回该部署的积分对象 |
+| `login(region)` | 调宿主 `/workbuddy/login`，返回 `{ url }` 之类的登录信息 |
+| `renew(region?)` | 调宿主 `/workbuddy/refresh`；不给 region 就两个一起续 |
+
+`region` 收 `'cn'` / `'intl'` / 完整 provider id 三种写法。
+
+快照形状（`providers` 的键是**完整 provider id**）：
+
+```js
+{
+  version: 1,
+  updatedAt: 1750000000000,
+  providers: {
+    '@huai_xin/dsh-workbuddy/cn': {
+      region: 'cn',
+      provider: '@huai_xin/dsh-workbuddy/cn',
+      displayName: 'WorkBuddy 大陆版',
+      loggedIn: true,
+      pending: false,
+      credits: 1280,              // number，取不到是 null（不是 0）
+      models: {
+        hy3: {
+          name: 'Hy3',
+          enabled: true,          // 用户的选择器里该不该出现
+          available: true,        // 探测判定（false = 无权限/已下架/限流/积分不足/凭据失效）
+          busy: 'normal',         // 大陆版才有，海外版恒为 null
+          rate: 0.11              // 实时倍率倍数；"未知" 是 null，"免费" 是 0
+        }
+      }
+    }
+  }
+}
+```
+
+规则：
+
+- **全部 JSON 可序列化**：不要放 `Map`、`Date`、`undefined`、函数、类实例；
+- **`rate` 是数字不是字符串**：宿主给的是 `"x0.11 credits"`，面板用 `numericRate()` 解析，
+  取不到是 `null`（禁止用旧值兜底，也禁止把"未知"当成 0）；
+- **`available` 与 `enabled` 是两件事**：前者是探测结论，后者是用户开关。消费方要展示"现在
+  能不能用"看 `available`，要展示"用户要不要它"看 `enabled`；
+- **路由预设不进 `models`**（`default-model` 之类是别名，不是模型）；
+- **这个服务必须是可选的**：不要加进 `dsh.client.inject` 强制依赖，别人探测不到就退回纯文本。
+  `ctx.provide` 用 `try/catch` 包着，老宿主没有服务也不影响面板。
+
+面板在 `React.useEffect` 里发布（不能在渲染体里发布：通知订阅者会触发别的组件的 setState，
+夹在自己的渲染中间）。
 
 ## 目录与分层
 
@@ -39,7 +129,7 @@ src/
     recovery.js     自动续写的决策与载荷
   panel/
     api.js          面板用的宿主路由 /workbuddy/*
-client/index.js     设置面板（`settings.section` 槽位的客户端半边）
+client/index.js     设置面板（`settings.section` 槽位的客户端半边；同时 provide 状态服务）
 test/unit/          离线单测（`npm test`，15 个）
 test/live/          需要真实账号的在线探针与诊断脚本
 ```
@@ -137,7 +227,7 @@ test/live/          需要真实账号的在线探针与诊断脚本
 npm test                          # 全部
 node test/unit/plugin.mjs         # provider 注册、目录、/workbuddy 命令、HTTP 路由
 node test/unit/api.mjs            # 面板接口：状态载荷、积分/签到、参数校验、信任栅栏、图标
-node test/unit/client.mjs         # 客户端：注册、词典回退、三种状态的完整渲染、同名排序
+node test/unit/client.mjs         # 客户端：注册、词典回退、完整渲染、同名排序、token 单位、状态服务
 node test/unit/region-order.mjs   # 显示顺序 ↔ 客户端占位顺序 ↔ 默认标签三者一致
 node test/unit/wire.mjs           # 工具结果保持 tool 角色、配对、旧格式、角色映射、reasoning 回放
 node test/unit/endings.mjs        # 结束分类整张表 + 优先级

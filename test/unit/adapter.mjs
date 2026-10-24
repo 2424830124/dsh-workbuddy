@@ -186,7 +186,7 @@ globalThis.fetch = async () => new Response(queueBody, { status: 429, headers: {
 let failure
 try {
   for await (const chunk of live.stream({
-    provider: 'workbuddy-cn',
+    provider: '@huai_xin/dsh-workbuddy/cn',
     model: 'hy3',
     system: 'You are helpful.',
     messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
@@ -220,7 +220,7 @@ const exhausted = async (status, body, expectCode) => {
   let caught
   try {
     for await (const chunk of adapter.stream({
-      provider: 'workbuddy-intl',
+      provider: '@huai_xin/dsh-workbuddy/intl',
       model: 'deepseek-v4.1-flash-sg',
       system: 'You are helpful.',
       messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
@@ -478,7 +478,7 @@ assert.equal(completeFinish.reason.kind, 'stop', 'a normal ending still reads as
 // verbatim, which is how "who answered, and what did upstream call it" is answered
 // without reconstructing it from the request headers.
 assert.equal(completeFinish.response.kind, 'workbuddy')
-assert.equal(completeFinish.response.provider, 'workbuddy-cn')
+assert.equal(completeFinish.response.provider, '@huai_xin/dsh-workbuddy/cn')
 assert.equal(completeFinish.response.model, 'hy3')
 assert.equal(completeFinish.response.responseId, 'chatcmpl-test-1')
 assert.equal(completeFinish.response.stopReason, 'stop')
@@ -563,7 +563,7 @@ const collectCutCall = async (finishReason) => {
   ].join('\n\n'))
   const chunks = []
   for await (const chunk of adapter.stream({
-    provider: 'workbuddy-cn',
+    provider: '@huai_xin/dsh-workbuddy/cn',
     model: 'hy3',
     system: 'You are helpful.',
     messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],

@@ -125,9 +125,13 @@ const locale = {
   bind: () => (key) => (key === 'section' ? 'WorkBuddy 模型（来自词典服务）' : key)
 }
 
+const provided = new Map()
 module.apply({
   get: (name) => (name === 'locale' ? locale : undefined),
   effect: (factory) => { effects.push(factory) },
+  // Client services: `ctx.provide(name, value)` is how one plugin publishes for another
+  // (`chatFileMentions`, `theme` and `feedbackUi` do the same upstream).
+  provide: (name, value) => { provided.set(name, value) },
   slots: {
     inject: (owner, callback) => {
       injected.push(owner)
@@ -149,6 +153,31 @@ assert.equal(typeof registrations[0].component, 'function')
 assert.equal(locales.length, 2)
 assert.ok(locales.every((entry) => entry.ns === 'workbuddy'))
 assert.ok(effects.length >= 1)
+
+// The state service other client plugins read. It must be provided under the scoped name,
+// satisfy the observable contract before any data arrives, and never throw.
+{
+  const service = provided.get('@huai_xin/dsh-workbuddy/state')
+  assert.ok(service !== undefined, 'the state service is provided')
+  assert.equal(typeof service.getSnapshot, 'function')
+  assert.equal(typeof service.subscribe, 'function')
+
+  const empty = service.getSnapshot()
+  assert.deepEqual(empty.providers, {}, 'nothing published yet is an empty map, not undefined')
+  assert.equal(service.getSnapshot(), empty, 'getSnapshot returns a stable reference')
+  assert.doesNotThrow(() => JSON.stringify(empty))
+
+  const seen = []
+  const unsubscribe = service.subscribe((snapshot) => seen.push(snapshot))
+  const next = { version: 1, updatedAt: 1, providers: { '@huai_xin/dsh-workbuddy/cn': { loggedIn: true } } }
+  service.publish(next)
+  assert.equal(seen.length, 1, 'a subscriber hears about a publication')
+  assert.equal(seen[0], next, 'and gets the snapshot itself')
+  unsubscribe()
+  service.publish({ version: 1, updatedAt: 2, providers: {} })
+  assert.equal(seen.length, 1, 'unsubscribing stops the notifications')
+  assert.doesNotThrow(() => service.subscribe(undefined), 'a bad subscriber is refused, not thrown at')
+}
 
 // The label thunk must survive a locale switch (it is re-read per projection).
 assert.equal(registrations[0].options.label(), 'WorkBuddy 模型（来自词典服务）', 'a key the service knows comes from the service')
@@ -192,7 +221,7 @@ const titlesOf = (node, out = []) => {
 
 const region = (overrides) => ({
   id: 'cn',
-  provider: 'workbuddy-cn',
+  provider: '@huai_xin/dsh-workbuddy/cn',
   endpoint: 'https://www.workbuddy.cn',
   loggedIn: true,
   pending: false,
@@ -210,7 +239,7 @@ const region = (overrides) => ({
 const signedInState = {
   regions: [
     region({}),
-    region({ id: 'intl', provider: 'workbuddy-intl', nickname: '900000001', models: 1, hasBusy: false, checkin: null, lastClaim: null })
+    region({ id: 'intl', provider: '@huai_xin/dsh-workbuddy/intl', nickname: '900000001', models: 1, hasBusy: false, checkin: null, lastClaim: null })
   ],
   importToken: 'token',
   version: '0.0.0-test',
@@ -225,7 +254,7 @@ const signedInState = {
 const signedOutState = {
   regions: [
     region({ loggedIn: false, expiresAt: 0, nickname: '', credits: null, checkin: null, lastClaim: null, models: 0 }),
-    region({ id: 'intl', provider: 'workbuddy-intl', loggedIn: false, expiresAt: 0, nickname: '', credits: null, checkin: null, lastClaim: null, models: 0, hasBusy: false })
+    region({ id: 'intl', provider: '@huai_xin/dsh-workbuddy/intl', loggedIn: false, expiresAt: 0, nickname: '', credits: null, checkin: null, lastClaim: null, models: 0, hasBusy: false })
   ],
   importToken: 'token',
   version: '0.0.0-test',
@@ -313,6 +342,29 @@ for (const expected of ['账户', '大陆版', '海外版', '示例账号', '可
   assert.ok(signedInText.includes(expected), `the panel renders ${expected}`)
 }
 assert.ok(titlesOf(signedInTree).some((title) => title.startsWith('繁忙程度：')), 'the load tag explains itself in a tooltip')
+
+// The published snapshot after a real render: keyed by the full provider id, one entry per
+// deployment, and each model carrying exactly the fields a selector would act on.
+{
+  const snapshot = provided.get('@huai_xin/dsh-workbuddy/state').getSnapshot()
+  assert.ok(snapshot.updatedAt > 0, 'the panel published once it loaded')
+  assert.deepEqual(Object.keys(snapshot.providers).sort(), ['@huai_xin/dsh-workbuddy/cn', '@huai_xin/dsh-workbuddy/intl'])
+  const cn = snapshot.providers['@huai_xin/dsh-workbuddy/cn']
+  assert.equal(cn.region, 'cn')
+  assert.equal(cn.loggedIn, true)
+  assert.equal(typeof cn.credits, 'number', 'the balance travels with the snapshot')
+  const hy3 = cn.models.hy3
+  assert.ok(hy3 !== undefined, 'a model is keyed by its id')
+  assert.equal(hy3.name, 'Hy3')
+  assert.equal(hy3.enabled, true)
+  assert.equal(hy3.available, true)
+  assert.equal(hy3.busy, 'busy', 'the busy level reaches the consumer')
+  assert.equal(hy3.rate, 0.08, 'and the live rate as a number')
+  assert.equal(cn.models['glm-5.0'].available, false, 'a dead model is not available')
+  assert.equal(cn.models['glm-5.0'].enabled, false)
+  assert.ok(!('default-model' in cn.models), 'router presets are not published as models')
+  assert.doesNotThrow(() => JSON.stringify(snapshot), 'the whole snapshot is JSON-serializable')
+}
 
 /** Find actual rendered elements without invoking a second renderer. */
 const nodesOf = (node, out = []) => {
