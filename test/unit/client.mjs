@@ -370,4 +370,34 @@ assert.ok(textsOf(failedTree).some((text) => text.includes('offline')), 'a faile
   assert.ok(byName(flash, sg) < 0 && byName(sg, flash) > 0, 'and the comparator is antisymmetric')
 }
 
-console.log('client.mjs: OK — registration, dictionaries, three full panel renders, and the same-name ordering verified')
+// 5) Token counts pick their unit from the digit count, and re-check after dividing.
+//
+// 131072 must not be quoted as "1000K" — one million is the next unit — and the rounding
+// itself can overflow: 999999 / 1000 is 999.999, which prints as "1000.00K" unless the
+// figure is compared after rounding.
+{
+  const source = (await import('node:fs')).readFileSync(new URL('../../client/index.js', import.meta.url), 'utf8')
+  const start = source.indexOf('const formatTokens = (value) => {')
+  assert.ok(start >= 0, 'the formatter is still there')
+  let depth = 0
+  let end = start
+  for (let index = start; index < source.length; index += 1) {
+    if (source[index] === '{') depth += 1
+    else if (source[index] === '}') { depth -= 1; if (depth === 0) { end = index + 1; break } }
+  }
+  const formatTokens = new Function(`${source.slice(start, end)}; return formatTokens`)()
+  assert.equal(formatTokens(999), '999', 'below a thousand, the raw number')
+  assert.equal(formatTokens(1000), '1.00K', 'four digits is a thousands figure')
+  assert.equal(formatTokens(131072), '131.07K')
+  assert.equal(formatTokens(256000), '256.00K')
+  assert.equal(formatTokens(999994), '999.99K', 'still below a million once rounded')
+  assert.equal(formatTokens(999995), '1.00M', 'and here rounding crosses into the next unit')
+  assert.equal(formatTokens(999999), '1.00M')
+  assert.equal(formatTokens(1000000), '1.00M', 'seven digits is millions')
+  assert.equal(formatTokens(1048576), '1.05M')
+  assert.equal(formatTokens(undefined), undefined)
+  assert.equal(formatTokens(-1), undefined)
+  assert.ok(!/k|m/.test(String(formatTokens(2000000))), 'suffixes are upper case')
+}
+
+console.log('client.mjs: OK — registration, dictionaries, three full panel renders, same-name ordering, and token units verified')
