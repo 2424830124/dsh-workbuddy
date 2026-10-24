@@ -152,7 +152,7 @@ src/
     catalog.js      实时目录（scoped + /v3/config 并行合并）+ 准入策略
     catalog-cache.js 目录落盘缓存（追加、缺字段不覆盖、倍率不落盘）
     availability.js 可用性台账（最小请求探测、分类、12 小时有效期）
-    model-prefs.js  每个模型的启停（只落盘"手工决定"；退出时整区隐藏）
+    model-prefs.js  每个模型的启停（只落盘"启用了哪些"，默认全停；退出不删）
     official-list.js 账号名单导入（id 或记录，字段级富化，不含倍率）
     busy.js         /v2/chat/busy 的繁忙程度（仅大陆版）
   llm/
@@ -205,6 +205,14 @@ test/live/          需要真实账号的在线探针与诊断脚本
    请求里**不发 `thinking` 字段**（2026-10-23 实测：带不带它对是否思考没有影响，`max` 档下
    不带反而思考更多；官方客户端只在关闭思考时才发 `{type:'disabled'}`）。
    不要重新引入 `canDisableThinking`，也不要凭空发明关闭参数或按模型名分支。
+8.1 **模型默认全部停用，只记"启用了哪些"。** 旧规则是"按判定给默认值"：探测没否定的
+   模型一律开。结果是一次重新登录之后，被限流的模型先是开着的，等探测把它挪进「不可用」
+   分组，用户还得一个个关掉 —— 而这个"默认值"本身从来没人选过。
+   现在 `enabled-<region>.json` 里只存一个 id 数组，不在数组里就是关；`isEnabled()` 不
+   接受判定参数。**退出登录不删这个数组**（只置 `loggedOut` 让选择器暂时看不到模型）：
+   账号明天还会回来，重新点四十个开关不是功能。
+   想改回"按判定给默认"，先回答一个问题：限流模型该默认开还是默认关？两种都会有人不满意，
+   而现在至少不会替用户做决定。
 9. **流必须以 `data: [DONE]` 收尾。** 没有 `[DONE]`、也没有 `finish_reason` 就断流，是连接被
    掐断，必须上报 `TRANSPORT` 错误（让重试策略接管），**绝不能映射成 `stop`** —— 否则用户看到
    的是"话说一半就停了，还不重试"，而且日志里什么都没有。同理，**参数被截断的工具调用不要
@@ -269,10 +277,10 @@ node test/unit/recovery.mjs       # 一轮上限、usage 累加、索引偏移�
 node test/unit/catalog.mjs        # 双数据源并发抓取、合并、回退
 node test/unit/catalog-cache.mjs  # 追加语义、缺字段不覆盖、倍率不落盘、读取时重放准入
 node test/unit/official-list.mjs  # 名单导入、字段级富化（不含倍率）、清理
-node test/unit/model-prefs.mjs    # 判定默认值、手工覆盖、批量开关、分部署探测形态
+node test/unit/model-prefs.mjs    # 默认全停、只记启用集合、批量开关、退出保留、v1 迁移、分部署探测形态
 node test/unit/availability.mjs   # 探测分类、dead 有效期、按 id 合并、分部署台账
 node test/unit/auth.mjs           # 退出删凭据、陈旧续期/登录结果不写回
-node test/unit/logout.mjs         # 退出隐藏全部模型、登录恢复判定默认
+node test/unit/logout.mjs         # 退出隐藏全部模型、但启用集合保留，登录后照旧
 node test/unit/adapter.mjs        # 提示词改写、请求体组装、聊天路由顺序、排队错误映射
 ```
 

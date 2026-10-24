@@ -283,9 +283,10 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
               requiredUserType: entry.requiredUserType,
               promotion: entry.promotion,
               availability: ledger.models.get(entry.id) ?? null,
-              enabled: isEnabled(prefs, entry.id, dead.has(entry.id)),
-              // Whether that state is a hand decision or just the verdict.
-              decided: prefs.on.has(entry.id) ? 'on' : (prefs.off.has(entry.id) ? 'off' : 'default')
+              enabled: isEnabled(prefs, entry.id),
+              // `on` means the user turned it on; everything else is the default, which is
+              // off. The panel keeps the distinction to word the hint, not to change the state.
+              decided: prefs.enabled.has(entry.id) ? 'on' : 'default'
             }))
           })
         } catch (error) {
@@ -322,19 +323,18 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
         const reset = body.reset === true
         const result = setEnabled(region.id, ids, enabled, { reset })
         const models = adapter === undefined ? [] : await adapter.models()
-        const dead = unusableModelIds(region.id)
         const prefs = readPrefs(region.id)
         // The picker caches its catalog until it hears this, so without the
         // notification a model switched off here stays selectable there.
         notifyModelTopology(ctx)
-        ctx.logger.info(`[workbuddy] ${region.id}: ${reset ? '恢复默认' : (enabled ? '启用' : '停用')} ${ids.length} 个模型（${ids.length <= 3 ? ids.join(', ') : `${ids.slice(0, 3).join(', ')}…`}），手工设定 开${result.on}/关${result.off}`)
+        ctx.logger.info(`[workbuddy] ${region.id}: ${reset ? '恢复默认（全部停用）' : (enabled ? '启用' : '停用')} ${ids.length} 个模型（${ids.length <= 3 ? ids.join(', ') : `${ids.slice(0, 3).join(', ')}…`}），当前启用 ${result.on} 个`)
         sendJson(res, 200, {
           region: region.id,
           saved: result.saved,
           on: result.on,
           off: result.off,
           total: models.length,
-          enabledCount: models.filter((entry) => isEnabled(prefs, entry.id, dead.has(entry.id))).length
+          enabledCount: models.filter((entry) => isEnabled(prefs, entry.id)).length
         })
         return
       }
@@ -555,7 +555,15 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
         if (path.endsWith('/login')) {
           try {
             const result = await beginLogin(ctx, region, {
-              onSuccess: () => adapters[region.id]?.invalidateCatalog()
+              onSuccess: () => {
+                // Runs once the poll has the token, which is after this request has already
+                // answered. The picker's catalog is cached until it hears the topology event,
+                // so without this the newly reachable models stay invisible until something
+                // else happens to notify it — measured: the log showed the account signing in
+                // and its models arriving, but the notification only appearing at logout.
+                adapters[region.id]?.invalidateCatalog()
+                notifyModelTopology(ctx)
+              }
             })
             sendJson(res, 200, { region: region.id, url: result.url, pending: result.pending })
           } catch (error) {
@@ -571,6 +579,9 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
           return
         }
         const result = await refreshRegion(ctx, region, { force: true })
+        // A renewed credential can make a previously rejected catalog readable, and the
+        // picker only re-reads when it hears this.
+        if (result.refreshed === true) notifyModelTopology(ctx)
         sendJson(res, 200, { region: region.id, ...result })
         return
       }

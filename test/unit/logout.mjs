@@ -1,9 +1,13 @@
 /**
- * Logging out hides the models, and the next login shows them again.
+ * Logging out hides the models, and the next login brings the user's choices back.
  *
- * The reported symptom: after signing out, the picker still listed the deployment's models
- * as usable — the cached catalog and the hand decisions were still there, so nothing said
- * "this deployment cannot be called".
+ * Two symptoms are pinned here:
+ *
+ * 1. After signing out the picker still listed the deployment's models as usable — the cached
+ *    catalog said nothing about "this deployment cannot be called".
+ * 2. Logging out used to wipe the switch state, so signing back in left every model off and the
+ *    user re-picking them by hand. The set now survives: it describes what the user chose, not
+ *    what the credentials currently allow.
  */
 import assert from 'node:assert/strict'
 import { rmSync } from 'node:fs'
@@ -21,26 +25,29 @@ const { setCredential, readCredential } = await import('../../src/core/paths.js'
 const region = REGIONS.cn
 const ctx = { logger: { info: () => {}, warn: () => {}, error: () => {} }, credentials: { resolve: async () => undefined } }
 
-// A normal state: hy3 on by verdict, glm-5.2 hand-enabled.
-setEnabled(region.id, ['glm-5.2'], true)
-assert.equal(isEnabled(readPrefs(region.id), 'hy3', false), true, 'a working model is offered by its verdict')
-assert.equal(isEnabled(readPrefs(region.id), 'glm-5.2', true), true, 'a hand decision wins over the verdict')
+// A normal state: the user turned two models on, and nothing else is offered.
+setEnabled(region.id, ['glm-5.2', 'hy3'], true)
+assert.equal(isEnabled(readPrefs(region.id), 'hy3'), true, 'an enabled model is offered')
+assert.equal(isEnabled(readPrefs(region.id), 'glm-5.2'), true)
+assert.equal(isEnabled(readPrefs(region.id), 'kimi-k3'), false, 'and nothing else is')
 
-// After logout nothing is offered, whatever the verdicts and hand decisions say.
+// After logout nothing is offered, whatever the recorded set says.
 setCredential(region.tokenRef, 'access')
 await logoutRegion(ctx, region)
 assert.equal(readCredential(region.tokenRef), '', 'the token is gone')
-assert.equal(isEnabled(readPrefs(region.id), 'hy3', false), false, 'a logged-out deployment offers nothing')
-assert.equal(isEnabled(readPrefs(region.id), 'glm-5.2', true), false, 'and no cached hand decision can override that')
-assert.ok(readPrefs(region.id).on.size === 0 && readPrefs(region.id).off.size === 0, 'logging out leaves no phantom hand decisions behind')
+assert.equal(isEnabled(readPrefs(region.id), 'hy3'), false, 'a logged-out deployment offers nothing')
+assert.equal(isEnabled(readPrefs(region.id), 'glm-5.2'), false)
+assert.deepEqual([...readPrefs(region.id).enabled].sort(), ['glm-5.2', 'hy3'], 'but logging out does not forget the choices')
 
-// A login clears the marker, and the verdict decides again.
+// A login clears the marker, and the recorded choices are offered again.
 clearLoggedOut(region.id)
-assert.equal(isEnabled(readPrefs(region.id), 'hy3', false), true, 'after login a working model is offered again')
-assert.equal(isEnabled(readPrefs(region.id), 'glm-5.2', true), false, 'and an unusable one is not, since its hand decision was cleared')
+assert.equal(isEnabled(readPrefs(region.id), 'hy3'), true, 'after login the choices come back')
+assert.equal(isEnabled(readPrefs(region.id), 'glm-5.2'), true)
+assert.equal(isEnabled(readPrefs(region.id), 'kimi-k3'), false, 'and the models nobody enabled stay off')
 
 // Marking twice is harmless.
 markLoggedOut(region.id)
 assert.equal(markLoggedOut(region.id).alreadyOut, true)
+assert.deepEqual([...readPrefs(region.id).enabled].sort(), ['glm-5.2', 'hy3'], 'and still does not touch the set')
 
-console.log('logout.mjs: OK — logging out hides every model, and a login restores the verdict-based defaults')
+console.log('logout.mjs: OK — logging out hides every model while the enabled set survives, and a login offers them again')

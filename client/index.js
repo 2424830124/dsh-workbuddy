@@ -90,7 +90,7 @@ window.__ModuleLoader__.load({
         enableAll: '全部启用',
         enableAllHint: '把「可用模型」分组里的模型全部放进模型选择器（不动不可用分组）',
         disableAll: '全部停用',
-        disableAllHint: '把「可用模型」分组里的模型全部移出模型选择器（不动不可用分组；面板里仍然保留，随时开回来）',
+        disableAllHint: '移出模型选择器：两组都算，面板里仍然保留，随时开回来',
         renewBoth: '续期',
         renewBothHint: '两个部署一起续期（未登录的跳过）',
         renewing: '续期中…',
@@ -178,7 +178,7 @@ window.__ModuleLoader__.load({
         enableAll: 'Enable all',
         enableAllHint: 'Offer every model in this list in the picker',
         disableAll: 'Disable all',
-        disableAllHint: 'Take every model in this list out of the picker (they stay here and can be turned back on)',
+        disableAllHint: 'Take every model out of the picker, both groups (they stay here and can be turned back on)',
         renewBoth: 'Renew',
         renewBothHint: 'Renew both deployments at once (signed-out ones are skipped)',
         renewing: 'Renewing…',
@@ -1269,7 +1269,6 @@ window.__ModuleLoader__.load({
         return { text: t('statusLoggedOut'), token: 'var(--dsw-alias-state-idle-primary, #8a8f98)' }
       }
 
-      /** Turn one model, a group, or every row on/off; `reset` returns to the verdict default. */
       /**
        * Flip one or more switches.
        *
@@ -1279,8 +1278,9 @@ window.__ModuleLoader__.load({
        * trips per deployment (credits and check-in, 346 ms measured) and answers a question
        * no switch asks.
        *
-       * `reset` is the exception: it moves every id back to its verdict default, so the
-       * affected set is the whole list and only the host knows the outcome.
+       * `reset` is the exception: it clears the whole recorded set (everything off, which is
+       * the default), so the affected set is the whole list and only the host knows the
+       * outcome.
        */
       const setModelsEnabled = async (regionId, ids, enabled, reset = false) => {
         if (ids.length === 0) return
@@ -1790,8 +1790,8 @@ window.__ModuleLoader__.load({
               key: 'enable-all',
               type: 'button',
               className: 'wb-btn wb-btn-ghost',
-              // Only the usable group: the unusable one is the user's own call,
-              // and a bulk switch there would fight the verdict defaults.
+              // Only the usable group: offering a model whose last probe failed is the
+              // user's call, not something a bulk button should decide.
               disabled: busy === `enabled:${region.id}` || usable.length === 0,
               title: t('enableAllHint'),
               onClick: () => void setModelsEnabled(region.id, usable.map((model) => model.id), true)
@@ -1800,9 +1800,13 @@ window.__ModuleLoader__.load({
               key: 'disable-all',
               type: 'button',
               className: 'wb-btn wb-btn-ghost',
-              disabled: busy === `enabled:${region.id}` || usable.length === 0,
+              // Every row, not just the usable group. Turning something off is always safe,
+              // and the model that just got relabelled into 不可用 is exactly the one a user
+              // wants out of the picker — being told to find it in another group and flip it
+              // one row at a time is the chore this button exists to remove.
+              disabled: busy === `enabled:${region.id}` || usableRows.length === 0,
               title: t('disableAllHint'),
-              onClick: () => void setModelsEnabled(region.id, usable.map((model) => model.id), false)
+              onClick: () => void setModelsEnabled(region.id, usableRows.map((model) => model.id), false)
             }, t('disableAll'))
           ),
           region.loggedIn !== true

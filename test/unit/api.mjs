@@ -11,7 +11,7 @@
  */
 
 import assert from 'node:assert/strict'
-import { rmSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -245,6 +245,25 @@ const beforeRead = topologyNotices.length
 await call('GET', '/workbuddy/models?region=cn')
 await call('GET', '/workbuddy/state')
 assert.equal(topologyNotices.length, beforeRead, 'plain reads do not notify')
+
+// A login notifies **when the token arrives**, not when the request returns.
+//
+// `beginLogin` answers immediately with a pending flag; the real token lands later in a poll,
+// so the notification has to live in the `onSuccess` callback. The reported bug was a freshly
+// signed-in account whose models stayed invisible until something else notified the picker —
+// the log showed the account signing in and its models arriving, with the notice only ever
+// appearing at logout.
+//
+// Asserted against the source rather than by calling the route: a real `/login` starts an
+// authorization flow (and its listener), which an offline unit test must not do.
+{
+  const source = readFileSync(new URL('../../src/panel/api.js', import.meta.url), 'utf8')
+  const start = source.indexOf('onSuccess: () => {')
+  assert.ok(start > 0, 'the login route supplies an onSuccess callback')
+  const body = source.slice(start, source.indexOf('})', start))
+  assert.match(body, /invalidateCatalog\(\)/, 'the completed login invalidates the cached catalog')
+  assert.match(body, /notifyModelTopology\(ctx\)/, 'and notifies the picker, which caches its list')
+}
 
 // A composition without the llm service (headless, or an older harness) must
 // still serve every route: the notification is an optimisation, not a dependency.

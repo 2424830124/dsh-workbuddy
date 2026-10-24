@@ -20,7 +20,7 @@ import { join } from 'node:path'
 
 import { hasUsableToolName, normalizeToolArguments, toWireMessages } from './wire.js'
 import { accountIdOf, freshToken, refreshRegion } from '../account/auth.js'
-import { unusableModelIds, readAvailability, writeAvailability } from '../catalog/availability.js'
+import { readAvailability, writeAvailability } from '../catalog/availability.js'
 import { fetchModelEntries } from '../catalog/catalog.js'
 import { readCatalogCache, writeCatalogCache } from '../catalog/catalog-cache.js'
 import { readPrefs, isEnabled } from '../catalog/model-prefs.js'
@@ -474,12 +474,10 @@ export class WorkBuddyAdapter {
 
   async listModels(provider) {
     const catalog = await this.models()
-    // What the picker offers: the hand decisions first, the availability verdict
-    // as the default (see `model-prefs.js`). An unusable model stays selectable
-    // when the user asks for it, which is how one gets tried anyway.
+    // What the picker offers: only what the user switched on (see `model-prefs.js`). A model
+    // nobody touched is absent, whatever its verdict says.
     const prefs = readPrefs(this.region.id)
-    const dead = unusableModelIds(this.region.id)
-    const offered = catalog.filter((entry) => isEnabled(prefs, entry.id, dead.has(entry.id)))
+    const offered = catalog.filter((entry) => isEnabled(prefs, entry.id))
     // Always logged: one line per picker open, and the fastest way to answer
     // "did the picker re-read the list after that switch was flipped?".
     this.ctx.logger.info(`[workbuddy] ${this.region.id}: 选择器读取目录 → ${offered.length}/${catalog.length} 个可选`)
