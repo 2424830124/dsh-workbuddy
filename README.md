@@ -47,6 +47,19 @@ npm 页面：<https://www.npmjs.com/package/@huai_xin/dsh-workbuddy>
 登录完去设置页把想用的模型开关打开，它们就会出现在模型选择器里（默认全部停用）。
 两个部署各自独立登录，互不影响。
 
+### 与 dsh-model-picker 联动
+
+本插件会向客户端发布一个状态服务（`@huai_xin/dsh-workbuddy/state`），我的
+[dsh-model-picker](https://www.npmjs.com/package/@huai_xin/dsh-model-picker) 插件读取它，
+在模型选择器里做两件事：
+
+- **显示积分**：每个部署的实时余额直接出现在选择器里，不用打开设置页；
+- **优化显示**：模型的探测结论（可用 / 限流 / 无权限…）、繁忙状态与实时倍率跟着模型一起
+  展示，启用了哪些就显示哪些。
+
+两个插件都装上即可联动，不需要任何配置。状态由本插件自动加载与刷新（每 5 分钟一次，
+打开设置页的动作也会触发），选择器那边只管读。
+
 ### 设置页
 
 设置 → WorkBuddy，两张卡片。
