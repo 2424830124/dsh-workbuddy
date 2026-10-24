@@ -11,7 +11,7 @@
  * panel asks whenever it opens, and the levels are shared between callers.
  */
 
-import { readToken } from '../account/auth.js'
+import { freshToken } from '../account/auth.js'
 import { requestJson } from '../core/http.js'
 import { chatRoutes } from '../core/regions.js'
 
@@ -29,7 +29,7 @@ export async function fetchBusyLevels(ctx, region, ids) {
   const cached = cache.get(region.id)
   if (cached !== undefined && Date.now() - cached.at < BUSY_TTL_MS) return cached.levels
 
-  const token = await readToken(ctx, region)
+  const token = await freshToken(ctx, region)
   if (token.length === 0) return new Map()
   const [route] = chatRoutes(region)
   const { status, json } = await requestJson('POST', `${route.endpoint}/v2/chat/busy`, {

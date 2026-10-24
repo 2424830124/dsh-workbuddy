@@ -219,10 +219,55 @@ export async function readToken(ctx, region) {
 }
 
 /**
+ * How old a token may be before a request refreshes it first.
+ *
+ * The claim says 28 days and the server disagrees — the host log has a refreshed token
+ * rejected 90 seconds later — so "is it still valid according to the JWT" is not a usable
+ * question. Two minutes keeps every outgoing request holding a token that was just minted,
+ * at the cost of at most one refresh per two minutes per region.
+ */
+export const TOKEN_MAX_AGE_MS = 2 * 60_000
+
+/**
+ * The token to send, refreshed first when it is older than {@link TOKEN_MAX_AGE_MS}.
+ *
+ * This is the "refresh before you send" the official clients do implicitly: it makes every
+ * caller — chat, catalog, credits, busy — start from a fresh token instead of discovering a
+ * dead one through a 401. A failed refresh is not fatal: the caller still gets the token it
+ * had, and its own 401 path takes over.
+ */
+export async function freshToken(ctx, region) {
+  const meta = await readMeta(ctx, region)
+  const age = typeof meta?.updatedAt === 'number' ? Date.now() - meta.updatedAt : Number.POSITIVE_INFINITY
+  if (age > TOKEN_MAX_AGE_MS) {
+    await refreshRegion(ctx, region, { rotate: true }).catch(() => undefined)
+  }
+  return readToken(ctx, region)
+}
+
+/**
+ * One refresh in flight per region.
+ *
+ * The sweep, a 401 retry, the panel's 续期 button and a chat request can all decide to
+ * refresh within the same second — the host log shows four refreshes inside four seconds.
+ * They all read the same refresh token and race to write a new one, so whichever finishes
+ * last decides what is stored. Sharing the promise means one request, one write.
+ */
+const refreshInFlight = new Map()
+
+/**
  * Rotate one region's tokens when the access token is close to expiry.
  * Failures are logged, never thrown: a stale token must not break the plugin.
  */
 export async function refreshRegion(ctx, region, options = {}) {
+  const running = refreshInFlight.get(region.id)
+  if (running !== undefined) return running
+  const task = performRefresh(ctx, region, options).finally(() => refreshInFlight.delete(region.id))
+  refreshInFlight.set(region.id, task)
+  return task
+}
+
+async function performRefresh(ctx, region, options) {
   const generation = authGeneration(region)
   const meta = await readMeta(ctx, region)
   if (meta === undefined || typeof meta.refreshToken !== 'string' || meta.refreshToken.length === 0) {

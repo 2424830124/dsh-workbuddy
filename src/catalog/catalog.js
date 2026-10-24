@@ -16,7 +16,7 @@
  */
 
 import { readString, requestJson, responseData, responseMessage } from '../core/http.js'
-import { readToken } from '../account/auth.js'
+import { freshToken } from '../account/auth.js'
 
 /**
  * @typedef {object} CatalogEntry
@@ -355,7 +355,7 @@ function catalogHeaders(region, token) {
 
 /** The account-scoped catalog: full metadata, and the preferred source. */
 async function fetchScopedModelEntries(ctx, region) {
-  const token = await readToken(ctx, region)
+  const token = await freshToken(ctx, region)
   if (token.length === 0) throw new Error(`未登录 — 请先运行 /workbuddy login ${region.id}`)
   const { status, json } = await requestJson('GET', `${region.endpoint}/console/enterprises/personal/models`, catalogHeaders(region, token))
   if (status !== 200) throw new Error(`models HTTP ${status}${responseMessage(json) ? `: ${responseMessage(json)}` : ''}`)
@@ -457,7 +457,7 @@ export function parseModelsFromConfig(json) {
 }
 
 async function fetchConfigModelEntries(ctx, region) {
-  const token = await readToken(ctx, region)
+  const token = await freshToken(ctx, region)
   if (token.length === 0) throw new Error(`未登录 — 请先运行 /workbuddy login ${region.id}`)
   const { status, json } = await requestJson('GET', `${region.endpoint}/v3/config`, catalogHeaders(region, token))
   if (status !== 200) throw new Error(`v3/config HTTP ${status}${responseMessage(json) ? `: ${responseMessage(json)}` : ''}`)

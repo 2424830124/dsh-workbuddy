@@ -32,7 +32,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { accountIdOf, readToken } from '../account/auth.js'
+import { accountIdOf, freshToken } from '../account/auth.js'
 import { chatRoutes } from '../core/regions.js'
 import { ensurePluginDir } from '../core/paths.js'
 
@@ -167,7 +167,7 @@ export function probeBody(region, id) {
  */
 export async function probeModel(ctx, region, id, options = {}) {
   const started = Date.now()
-  const token = options.token ?? await readToken(ctx, region)
+  const token = options.token ?? await freshToken(ctx, region)
   const [route] = chatRoutes(region)
   const record = (state, detail) => ({ id, state, detail, at: Date.now(), ms: Date.now() - started })
   if (token.length === 0) return record('auth', '未登录')
@@ -238,7 +238,9 @@ export async function runSweep(ctx, region, ids, options = {}) {
     const due = sweepDue(region.id, interval, Date.now(), account)
     if (due.due !== true) return { skipped: true, reason: 'interval', lastSweepAt: due.lastSweepAt, results: [] }
   }
-  const token = await readToken(ctx, region)
+  // One fresh token for the whole sweep: the probes are metadata-only calls, so a token
+  // minted two minutes ago is guaranteed to be good for all of them.
+  const token = await freshToken(ctx, region)
   const results = []
   let cursor = 0
   const concurrency = Math.max(1, options.concurrency ?? PROBE_CONCURRENCY)

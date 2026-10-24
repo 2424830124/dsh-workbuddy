@@ -172,4 +172,56 @@ void readFileSync
   globalThis.fetch = realFetch
 }
 
-console.log('auth.mjs: OK — logout deletes credentials, stale work cannot write them back, and the sweep ignores the exp claim')
+// ---------------------------------------------------------------------------
+// 6) Concurrent callers share one refresh, and a request refreshes a stale token first.
+//
+// The host log showed four refreshes inside four seconds — sweep, 401 retry and panel all
+// deciding at once. They read the same refresh token and race to store a new one, so
+// whichever finished last decided what the plugin kept.
+// ---------------------------------------------------------------------------
+{
+  const store = createStore({
+    [region.tokenRef]: 'access-1',
+    [region.metaRef]: JSON.stringify({ refreshToken: 'refresh-1', expiresAt: Date.now() + 28 * 24 * 3600_000, updatedAt: Date.now() })
+  })
+  const ctx = createCtx(store)
+  let calls = 0
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('auth/token/refresh')) {
+      calls += 1
+      // A slow answer, so the second caller arrives while the first is in flight.
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      return new Response(JSON.stringify({ code: 0, data: { accessToken: `access-${calls + 1}` } }), {
+        status: 200, headers: { 'content-type': 'application/json' }
+      })
+    }
+    return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+
+  const results = await Promise.all([
+    refreshRegion(ctx, region, { rotate: true }),
+    refreshRegion(ctx, region, { rotate: true }),
+    refreshRegion(ctx, region, { rotate: true })
+  ])
+  assert.equal(calls, 1, 'three concurrent callers produce one refresh request')
+  assert.ok(results.every((entry) => entry.refreshed === true), 'and all of them see the result')
+  assert.equal(readCredential(region.tokenRef), 'access-2')
+
+  // freshToken: a token older than the window is renewed before the caller sends it.
+  const { freshToken, TOKEN_MAX_AGE_MS } = await import('../../src/account/auth.js')
+  const staleMeta = JSON.parse(readCredential(region.metaRef))
+  setCredential(region.metaRef, JSON.stringify({ ...staleMeta, updatedAt: Date.now() - TOKEN_MAX_AGE_MS - 1 }))
+  calls = 0
+  const token = await freshToken(ctx, region)
+  assert.equal(calls, 1, 'a stale token is refreshed before use')
+  assert.equal(token, 'access-2', 'and the caller gets the new one')
+
+  // A token inside the window is used as-is: the common case costs nothing.
+  calls = 0
+  const cached = await freshToken(ctx, region)
+  assert.equal(calls, 0, 'a fresh token is not refreshed again')
+  assert.equal(cached, 'access-2')
+  globalThis.fetch = realFetch
+}
+
+console.log('auth.mjs: OK — logout deletes credentials, stale work cannot write them back, the sweep ignores the exp claim, and refreshes are shared')

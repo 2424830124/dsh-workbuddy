@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { hasUsableToolName, normalizeToolArguments, toWireMessages } from './wire.js'
-import { accountIdOf, readToken, refreshRegion } from '../account/auth.js'
+import { accountIdOf, freshToken, refreshRegion } from '../account/auth.js'
 import { unusableModelIds, readAvailability, writeAvailability } from '../catalog/availability.js'
 import { fetchModelEntries } from '../catalog/catalog.js'
 import { readCatalogCache, writeCatalogCache } from '../catalog/catalog-cache.js'
@@ -344,7 +344,7 @@ export class WorkBuddyAdapter {
         this.catalogCachedAt = undefined
         this.ctx.logger.warn(`[workbuddy] ${this.region.id}: 取不到目录，只有导入的账号名单（${this.catalog.length} 个）— ${loaded.reasons.join('；')}`)
       } else {
-        const token = await readToken(this.ctx, this.region)
+        const token = await freshToken(this.ctx, this.region)
         if (token.length > 0) {
           this.ctx.logger.warn(`[workbuddy] ${this.region.id}: 取不到模型列表，且没有本地缓存 — ${loaded.reasons.join('；')}`)
         }
@@ -755,7 +755,7 @@ export class WorkBuddyAdapter {
   async *streamRound(options, offset) {
     const model = options.model
     const entry = await this.entryOf(model)
-    let token = await readToken(this.ctx, this.region)
+    let token = await freshToken(this.ctx, this.region)
     if (token.length === 0) {
       throw llmError(`${this.region.provider}: 未登录，请先运行 /workbuddy login ${this.region.id}`, 'MISSING_CREDENTIAL')
     }
@@ -791,7 +791,7 @@ export class WorkBuddyAdapter {
       } else if (response.status === 401 || response.status === 403) {
         const rotated = await refreshRegion(this.ctx, this.region, { force: true })
         if (rotated.refreshed) {
-          token = await readToken(this.ctx, this.region)
+          token = await freshToken(this.ctx, this.region)
           if (token.length > 0) {
             response = await this.send(token, payload(), options.signal, route, model, messageId)
             rejection = response.ok ? '' : await response.text().catch(() => '')

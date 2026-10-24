@@ -18,7 +18,7 @@
  * works.
  */
 
-import { readMeta, readToken } from './auth.js'
+import { freshToken, readMeta } from './auth.js'
 import { localDayKey, requestJson, responseCode, responseMessage } from '../core/http.js'
 import { REGIONS } from '../core/regions.js'
 import { setCredential } from '../core/paths.js'
@@ -49,7 +49,7 @@ function creditHeaders(token, region) {
 }
 
 async function postMeter(ctx, region, path) {
-  const token = await readToken(ctx, region)
+  const token = await freshToken(ctx, region)
   if (token.length === 0) return { ok: false, reason: '未登录' }
   const { status, json } = await requestJson('POST', `${region.endpoint}${path}`, creditHeaders(token, region), {
     body: '{}',
@@ -169,7 +169,7 @@ export async function fetchCheckinStatus(ctx, region) {
  */
 export async function claimDailyCheckin(ctx, region) {
   if (CHECKIN_SUPPORTED[region.id] !== true) return { claimed: false, reason: '该部署没有签到接口' }
-  const token = await readToken(ctx, region)
+  const token = await freshToken(ctx, region)
   if (token.length === 0) return { claimed: false, reason: '未登录' }
   const { status, json } = await requestJson('POST', `${region.endpoint}${DAILY_CHECKIN_PATH}`, creditHeaders(token, region), {
     body: '{}',
