@@ -100,7 +100,22 @@ export function classifyProbe(status, body) {
   }
   if (status === 401 || status === 403) return { state: 'auth', detail: `凭据被拒（HTTP ${status}）` }
   if (status >= 500) return { state: 'down', detail: `上游故障（HTTP ${status}）` }
-  if (status === 429) return { state: 'busy', detail: '限流（HTTP 429）' }
+  // `429` is three different answers and only one of them is "usable later today":
+  //
+  //  - queue (`6020`) — the model is busy; the next attempt may well succeed, so it stays
+  //    in the usable group. Handled above, before this branch.
+  //  - credits exhausted (`14018`) — nothing works until someone pays.
+  //  - rate window used up (`6004` / `exceeds frequency limit`) — nothing works until the
+  //    stated reset, which is hours away.
+  //
+  // The last two were `busy` too, so a panel full of throttled models sat in 可用 with a
+  // grey 未知 chip. They are verdicts, not guesses: the account cannot call them now.
+  if (status === 429) {
+    if (/14018|credits exhausted|insufficient_quota/i.test(text)) {
+      return { state: 'noquota', detail: '积分已用尽（HTTP 429 code 14018）' }
+    }
+    return { state: 'throttled', detail: `频率超限（HTTP 429${/6004/.test(text) ? ' code 6004' : ''}）` }
+  }
   if (status === 200) return { state: 'ok', detail: '' }
   if (status >= 400 && status < 500) {
     const message = /"msg":"([^"]{0,60})/.exec(text)?.[1] ?? ''

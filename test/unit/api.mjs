@@ -314,4 +314,24 @@ const maskRes = makeRes()
 await route.handler({ method: 'GET', url: '/workbuddy/icon-mask', headers: {} }, maskRes)
 assert.equal(maskRes.statusCode, 200, 'the alpha mask is served too')
 
-console.log('api.mjs: OK — routes, validation, trust fence, credits, check-in, state payload, topology notices, and the artwork verified')
+// The default opener is loaded through a dynamic `import()` so the child-process helper is
+// not pulled in at module load. A stale specifier there does not break the import of this
+// module — it fails only when someone clicks 「套餐」, which is exactly how it shipped once:
+// the role folders moved `api.js` but the dynamic path still said `./regions.js`.
+//
+// Resolving is asserted rather than launching: opening a browser in a test would be rude.
+{
+  const { existsSync } = await import('node:fs')
+  const { dirname, resolve } = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+  const apiPath = fileURLToPath(new URL('../../src/panel/api.js', import.meta.url))
+  const source = (await import('node:fs')).readFileSync(apiPath, 'utf8')
+  const dynamic = [...source.matchAll(/import\('(\.[^']+)'\)/g)].map((match) => match[1])
+  assert.ok(dynamic.length > 0, 'the opener is still late-bound')
+  for (const specifier of dynamic) {
+    const target = resolve(dirname(apiPath), specifier)
+    assert.ok(existsSync(target), `dynamic import ${specifier} resolves (→ ${target})`)
+  }
+}
+
+console.log('api.mjs: OK — routes, validation, trust fence, credits, check-in, state payload, topology notices, artwork, and the late-bound opener verified')

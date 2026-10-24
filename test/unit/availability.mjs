@@ -68,6 +68,22 @@ assert.equal(classifyProbe(200, 'data: {"code":0,"choices":[]}').state, 'ok')
 assert.equal(classifyProbe(400, '{"code":9999,"msg":"模型配置异常，请切换其他模型"}').state, 'ok', 'any other 4xx still proves the model is routed')
 assert.match(classifyProbe(400, '{"code":9999,"msg":"模型配置异常，请切换其他模型"}').detail, /模型配置异常/)
 assert.equal(classifyProbe(429, '{"code":6020,"msg":"queue.waiting.title","data":{"queue_position":1144}}').state, 'busy')
+
+// The other two 429s are not "busy" — they are "you cannot call this right now", and the
+// panel groups them with the unusable models instead of leaving them under 可用 with a grey
+// chip. Measured on 2026-10-24 with an empty overseas balance and a used-up mainland window.
+assert.equal(
+  classifyProbe(429, '{"error":{"data":{"code":14018,"msg":"Credits exhausted. Please visit the link below to purchase add-on packs"}}}').state,
+  'noquota',
+  'an empty balance reads as no credits, not as a throttled model'
+)
+assert.match(classifyProbe(429, '{"error":{"data":{"code":14018,"msg":"Credits exhausted."}}}').detail, /积分已用尽/)
+assert.equal(
+  classifyProbe(429, '{"code":6004,"msg":"您的使用量已超出频率限制，将在 2026-10-24 09:54:53 UTC+8 重置"}').state,
+  'throttled'
+)
+assert.equal(classifyProbe(429, '{"code":429,"msg":"usage exceeds frequency limit"}').state, 'throttled')
+assert.notEqual(classifyProbe(429, '{"error":{"data":{"code":14018,"msg":"Credits exhausted."}}}').state, 'busy', 'exhausted is never queued')
 assert.equal(classifyProbe(400, '{"code":11128,"msg":"Illegal API invocation from an unapproved channel"}').state, 'blocked')
 assert.equal(classifyProbe(401, 'nope').state, 'auth')
 assert.equal(classifyProbe(502, '<html>502</html>').state, 'down')

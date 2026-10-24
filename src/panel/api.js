@@ -42,7 +42,7 @@ let maskBytes
 
 /** Late-bound so importing this module never pulls in the child-process helper. */
 async function defaultOpenInBrowser(url) {
-  const { openInBrowser } = await import('./regions.js')
+  const { openInBrowser } = await import('../core/regions.js')
   return openInBrowser(url)
 }
 

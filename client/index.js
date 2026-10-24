@@ -100,6 +100,8 @@ window.__ModuleLoader__.load({
         stateDead: '不可用',
         stateDenied: '无权限',
         stateAuth: '凭据失效',
+        stateNoQuota: '积分不足',
+        stateThrottled: '限流',
         stateUnknown: '未知',
         detailId: '标识',
         detailContext: '上下文',
@@ -592,6 +594,11 @@ window.__ModuleLoader__.load({
       // A rejected credential is a definite answer, not an unknown one: every model
       // reported it, and the fix is a re-login rather than a retry.
       auth: 'stateAuth',
+      // Both are verdicts with a cause worth naming: the account is out of credits, or its
+      // rate window is used up. Showing 未知 here is what made a throttled list look
+      // undecided.
+      noquota: 'stateNoQuota',
+      throttled: 'stateThrottled',
       down: 'stateUnknown',
       error: 'stateUnknown'
     }
@@ -599,7 +606,8 @@ window.__ModuleLoader__.load({
       const key = entry === null || entry === undefined ? undefined : AVAILABILITY_LABEL[entry.state]
       if (key === undefined) return null
       const tone = entry.state === 'dead' ? 'wb-tag-bad'
-        : ((entry.state === 'denied' || entry.state === 'blocked' || entry.state === 'auth') ? 'wb-tag-warn' : '')
+        : ((entry.state === 'denied' || entry.state === 'blocked' || entry.state === 'auth' ||
+            entry.state === 'noquota' || entry.state === 'throttled') ? 'wb-tag-warn' : '')
       return tag(t(key), tone, { key: 'state', title: availabilityTitle(entry, t) })
     }
 
@@ -607,9 +615,8 @@ window.__ModuleLoader__.load({
     const availabilityColor = (entry) => {
       if (entry === null || entry === undefined) return 'var(--wb-line)'
       if (entry.state === 'dead') return 'var(--dsw-alias-state-error-primary, #e5484d)'
-      if (entry.state === 'denied' || entry.state === 'blocked' || entry.state === 'busy' || entry.state === 'auth') {
-        return 'var(--dsw-alias-state-warn-primary, #d89614)'
-      }
+      const warn = ['denied', 'blocked', 'busy', 'auth', 'noquota', 'throttled']
+      if (warn.includes(entry.state)) return 'var(--dsw-alias-state-warn-primary, #d89614)'
       if (entry.state === 'ok') return 'var(--dsw-alias-state-success-primary, #3fa45b)'
       // Grey: no conclusion was reached, so no alarm is raised either.
       return 'var(--dsw-alias-state-idle-primary, #8a8f98)'
@@ -940,13 +947,21 @@ window.__ModuleLoader__.load({
           String(model.name ?? '').toLowerCase().includes(needle) ||
           String(model.description ?? '').toLowerCase().includes(needle)
       })
-      // Grouped strictly by what the probe found. Only a missing model (`11102`)
-      // and a permission refusal (`11158`, `11128`) count as unusable; the
-      // transient and unexplained states stay in the usable group with a grey
-      // `未知` chip, because nothing has been proven about them.
+      /**
+       * Grouped by "can this be called right now", not by "is this a real model".
+       *
+       * Nothing that just failed the probe belongs in 可用: a missing id, no permission, a
+       * blocked channel, a rejected credential, an exhausted balance and a used-up rate
+       * window all mean the same thing to the person looking at the list. They come back to
+       * 可用 when a later probe finds them answering — the verdicts expire on their own.
+       *
+       * Only genuinely undecided states (a 5xx, an unparsed body) stay in 可用 with a grey
+       * chip: nothing has been proven about them either way.
+       */
       const unusableState = (model) => {
         const state = model.availability?.state
-        return state === 'dead' || state === 'denied' || state === 'blocked'
+        return state === 'dead' || state === 'denied' || state === 'blocked' ||
+          state === 'auth' || state === 'noquota' || state === 'throttled'
       }
       const presets = rows.filter((model) => model.preset === true)
       // Everything the bulk buttons may act on: real models, not router presets.
