@@ -103,6 +103,9 @@ window.__ModuleLoader__.load({
         stateNoQuota: '积分不足',
         stateThrottled: '限流',
         stateUnknown: '未知',
+        // The positive verdict, for the published snapshot: the row itself draws no chip
+        // when a model is fine, so this wording exists only for consumers.
+        stateAvailable: '可用',
         detailId: '标识',
         detailContext: '上下文',
         detailMaxOutput: '最大输出',
@@ -188,7 +191,10 @@ window.__ModuleLoader__.load({
         stateDead: 'unusable',
         stateDenied: 'no permission',
         stateAuth: 'credentials rejected',
+        stateNoQuota: 'out of credits',
+        stateThrottled: 'rate limited',
         stateUnknown: 'unknown',
+        stateAvailable: 'available',
         detailId: 'ID',
         detailContext: 'Context',
         detailMaxOutput: 'Max output',
@@ -504,11 +510,6 @@ window.__ModuleLoader__.load({
      * The same factor as a number, for consumers that do arithmetic instead of printing.
      * `null` when the catalog published no rate — the snapshot says "unknown", not "free".
      */
-    const numericRate = (credits) => {
-      if (typeof credits !== 'string') return null
-      const factor = /(\d+(?:\.\d+)?)/.exec(credits)
-      return factor === null ? null : Number.parseFloat(factor[1])
-    }
     /**
      * A zero rate reads as 「免费」 rather than 「0.00x」: that is the panel's own
      * vocabulary, and it is what the promotion block is advertising anyway.
@@ -680,11 +681,67 @@ window.__ModuleLoader__.load({
     const EMPTY_SNAPSHOT = Object.freeze({ version: 1, updatedAt: 0, providers: {} })
 
     /**
-     * Derive the published map from what the panel already holds.
+     * Verdict → dictionary key, mirroring what a row draws as its chip.
      *
-     * Only what a consumer would act on: whether the deployment is signed in, its balance,
-     * and per model the name, the switch state, the probe verdict, the busy level and the
-     * live rate. Presets are skipped — they are router aliases, not models.
+     * The published string is the panel's own wording on purpose: a selector that renders
+     * "限流" here and "limit reached" there would look like two different products, and the
+     * consumer would have to re-derive a verdict the panel already made.
+     */
+    const VERDICT_KEYS = {
+      dead: 'stateDead',
+      denied: 'stateDenied',
+      blocked: 'stateDenied',
+      auth: 'stateAuth',
+      noquota: 'stateNoQuota',
+      throttled: 'stateThrottled',
+      down: 'stateUnknown',
+      error: 'stateUnknown'
+    }
+
+    /**
+     * The dictionary `t`, once one exists.
+     *
+     * Snapshots are published after `apply()` has bound it, but the builder is module-level
+     * so the panel's helpers can share it. Before a locale arrives this echoes the key —
+     * which only happens in a host that never registered one.
+     */
+    let translate = (key) => key
+
+    /**
+     * The verdict as the row's chip words it.
+     *
+     * Driven by the chip table rather than by the group: a 5xx or an unparsed body draws
+     * 未知 on the row while still sitting in the usable group, and a consumer copying this
+     * string next to "可用" would be describing something the panel never said. States with
+     * no chip at all — a clean `ok`, a queue (`busy`), a model nothing was probed — read 可用.
+     */
+    function verdictText(model) {
+      const key = VERDICT_KEYS[model?.availability?.state]
+      return translate(key ?? 'stateAvailable')
+    }
+
+    /** The load label as the row words it, 未知 when the deployment reports nothing. */
+    function busyText(level) {
+      if (typeof level !== 'string' || level.length === 0) return translate('unknown')
+      return translate(BUSY_LABEL[level] ?? 'busyUnknown')
+    }
+
+    /** The rate as the row words it: "0.11x", 免费, or 未知 — never a made-up number. */
+    function rateText(model) {
+      if (isFreeModel(model)) return translate('freeModel')
+      return formatRate(model.credits) ?? translate('unknown')
+    }
+
+    /**
+     * Derive the published map.
+     *
+     * Only what a consumer would render: whether the deployment is signed in, its balance,
+     * and per **enabled** model the four strings a selector shows. Disabled models are left
+     * out — the user's switch is the answer to "should this appear in a picker", so a
+     * consumer filtering them again would only risk disagreeing with the panel.
+     *
+     * Field names are Chinese because that is the contract this consumer asked for; the
+     * values are whatever the row itself displays, so a selector can print them verbatim.
      */
     function buildStateSnapshot(state, modelMap, busyLevels, now = Date.now()) {
       const providers = {}
@@ -693,12 +750,12 @@ window.__ModuleLoader__.load({
         const models = {}
         for (const model of modelMap?.[region.id]?.list ?? []) {
           if (model?.preset === true || typeof model?.id !== 'string') continue
+          if (model.enabled === false) continue
           models[model.id] = {
-            name: model.name ?? model.id,
-            enabled: model.enabled !== false,
-            available: !isUnusable(model),
-            busy: busyLevels?.[region.id]?.[model.id] ?? null,
-            rate: numericRate(model.credits)
+            显示名称: model.name ?? model.id,
+            探测结果: verdictText(model),
+            繁忙状态: busyText(busyLevels?.[region.id]?.[model.id]),
+            倍率: rateText(model)
           }
         }
         const credits = region.credits
@@ -1741,6 +1798,9 @@ window.__ModuleLoader__.load({
             const local = localise(currentLocale, key)
             return local === undefined ? key : local
           }
+          // The published snapshot words its verdicts and rates through the same dictionary
+          // the rows use, so a consumer never has to keep a second translation table.
+          translate = t
 
           if (locale !== undefined && typeof locale.register === 'function' && typeof locale.getLocale === 'function') {
             const registered = []
