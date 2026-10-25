@@ -334,15 +334,33 @@ export class WorkBuddyAdapter {
     const imported = readOfficialList(this.region.id, this.accountId)
     if (loaded.entries.length > 0) {
       const applied = applyOfficialList(loaded.entries, imported)
-      this.catalog = applied.entries
+      // A model the live read dropped but the cache still holds is not forgotten
+      // on the spot: the cache is the deployment's own longer memory, and the
+      // live payloads are known to answer thinly (international `/v3/config`
+      // listed 28 models and omitted `step-5-preview` while it still answered a
+      // chat request with `200`). Such an entry is offered only while its
+      // `lastSeen` is inside the cache's TTL, which the read already enforced.
+      const cached = readCatalogCache(this.region.id)
+      if (cached !== undefined) {
+        const live = new Set(applied.entries.map((entry) => entry.id))
+        const recovered = cached.entries.filter((entry) => !live.has(entry.id))
+        if (recovered.length > 0) {
+          this.ctx.logger.info(`[workbuddy] ${this.region.id}: 实时目录未列出 ${recovered.length} 个缓存模型，仍按缓存提供（${recovered.map((entry) => entry.id).join('、')}）`)
+          this.catalog = applyOfficialList([...applied.entries, ...recovered], imported).entries
+        } else {
+          this.catalog = applied.entries
+        }
+      } else {
+        this.catalog = applied.entries
+      }
       this.catalogSource = loaded.source
       this.catalogCachedAt = undefined
       if (imported !== undefined && applied.added > 0) {
         this.ctx.logger.info(`[workbuddy] ${this.region.id}: 账号名单补入 ${applied.added} 个上游目录没有的模型`)
       }
-      const cached = writeCatalogCache(this.region.id, loaded.source, loaded.entries)
-      if (cached.saved && cached.added > 0) {
-        this.ctx.logger.info(`[workbuddy] ${this.region.id}: 目录缓存追加 ${cached.added} 个模型，累计 ${cached.total} 个`)
+      const written = writeCatalogCache(this.region.id, loaded.source, loaded.entries)
+      if (written.saved && written.added > 0) {
+        this.ctx.logger.info(`[workbuddy] ${this.region.id}: 目录缓存追加 ${written.added} 个模型，累计 ${written.total} 个`)
       }
     } else {
       const cached = readCatalogCache(this.region.id)

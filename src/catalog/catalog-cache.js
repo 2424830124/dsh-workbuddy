@@ -9,18 +9,33 @@
  * kept per deployment and served when both live sources fail, clearly labelled
  * as cached data (the panel shows when it was taken).
  *
- * Write policy — **append**:
+/**
+ * Write policy — **append, with one expiry**:
  *
  * - Every successful live read is merged into the file by model id: new ids are
  *   added, ids already known get their fields refreshed, and anything the read
- *   did not mention **stays**. A degraded upstream answer therefore cannot
- *   shrink the fallback list, and no shrink guard is needed.
- * - Each entry remembers `firstSeen` / `lastSeen`, so a future policy could
- *   expire entries that have not been seen for a long time; nothing expires
- *   them today.
+ *   did not mention **stays** — until it has been missing for
+ *   {@link ENTRY_TTL_MS}. A degraded upstream answer therefore cannot shrink
+ *   the fallback list, but a model the deployment genuinely stopped listing
+ *   eventually leaves it instead of lingering forever.
+ * - Each entry remembers `firstSeen` / `lastSeen`; `lastSeen` is the model's own
+ *   activity clock and is what the expiry reads. Nothing expires it before
+ *   {@link ENTRY_TTL_MS}.
  * - The write is atomic (staging file + rename), so a reader never sees a
  *   half-written list, and the replaced file is kept as `catalog-<region>.prev.json`
  *   for inspection or manual rollback.
+ *
+ * Why expiry at all: the cache exists to bridge an upstream outage, and a
+ * delisted model was expected to disappear with it. `step-5-preview` disproved
+ * that — the international deployment stopped listing it in `/v3/config`
+ * (2026-10-26, 28 models, no `step` id) while it still answers a chat request
+ * (`200`, 11 prompt tokens). With no expiry the cached entry survived, but it
+ * was unreachable: the cache is only read when *both* live sources fail, so the
+ * live list — which is what the picker actually offers — never grew it back.
+ * The TTL turns "stays forever but unusable" into "stays until the deployment
+ * really stops offering it", measured on the model's own last-seen day rather
+ * than on the snapshot's `savedAt`, which every successful read of *any* model
+ * would otherwise refresh.
  *
  * Location: `$DSH_HOME/cache/dsh-workbuddy/catalog-<region>.json`, falling back
  * to `~/.dsh/cache/...` when the environment does not set `DSH_HOME`.
@@ -34,6 +49,13 @@ import { isCatalogModelId, keepModel, withConsistentEfforts } from './catalog.js
 import { ensurePluginDir } from '../core/paths.js'
 
 const CACHE_VERSION = 1
+/**
+ * How long an entry the deployment no longer lists survives in the cache.
+ *
+ * Seven days of the *model's own* silence (`lastSeen`), not of the snapshot: a
+ * read that mentions no new models must not keep an unrelated model alive.
+ */
+const ENTRY_TTL_MS = 7 * 24 * 3600_000
 /** Modality order used across the catalog entries. */
 const MODALITY_ORDER = ['text', 'image']
 /**
@@ -74,6 +96,7 @@ function readFile(path) {
     if (parsed?.version !== CACHE_VERSION) return undefined
     if (!Array.isArray(parsed.entries)) return undefined
     if (typeof parsed.savedAt !== 'number' || !Number.isFinite(parsed.savedAt)) return undefined
+    const now = Date.now()
     return {
       // Volatile fields are dropped on read too: a snapshot written before they
       // were excluded must not leak a stale rate either. The admission policy is
@@ -86,10 +109,16 @@ function readFile(path) {
       // only worked for ids the account-scoped payload had touched too. What a cached
       // entry proves is that the deployment lists it — which is exactly what the cache
       // is for.
+      //
+      // The TTL is applied here as well as on write: an entry can sit unread for a
+      // long time (the cache is only consulted when both live sources fail), and a
+      // snapshot written before the TTL existed still holds entries that have since
+      // gone silent.
       entries: parsed.entries
         .filter((entry) => isCatalogModelId(entry?.id))
         .map((entry) => Object.fromEntries(Object.entries(entry).filter(([key]) => !VOLATILE_FIELDS.has(key))))
-        .filter((entry) => entry.preset !== true),
+        .filter((entry) => entry.preset !== true)
+        .filter((entry) => now - (typeof entry.lastSeen === 'number' && Number.isFinite(entry.lastSeen) ? entry.lastSeen : parsed.savedAt) <= ENTRY_TTL_MS),
       source: typeof parsed.source === 'string' ? parsed.source : 'unknown',
       savedAt: parsed.savedAt,
       /** How many models the read behind this snapshot actually returned. */
@@ -124,10 +153,15 @@ export function writeCatalogCache(regionId, source, entries) {
     const now = Date.now()
     const byId = new Map()
     for (const entry of previous?.entries ?? []) {
+      const lastSeen = typeof entry.lastSeen === 'number' && Number.isFinite(entry.lastSeen) ? entry.lastSeen : previous.savedAt
+      // Expiry is applied to the *previous* snapshot, so a model the deployment
+      // stopped listing leaves on its own schedule rather than being resurrected
+      // by the very read that dropped it.
+      if (now - lastSeen > ENTRY_TTL_MS) continue
       byId.set(entry.id, {
         ...entry,
         firstSeen: typeof entry.firstSeen === 'number' ? entry.firstSeen : previous.savedAt,
-        lastSeen: typeof entry.lastSeen === 'number' ? entry.lastSeen : previous.savedAt
+        lastSeen
       })
     }
     const before = byId.size

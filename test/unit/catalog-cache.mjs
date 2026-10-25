@@ -8,7 +8,7 @@
  */
 
 import assert from 'node:assert/strict'
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -126,4 +126,80 @@ const fallback = readCatalogCache('intl-fallback')
 assert.equal(fallback.entries.length, 1, 'a config-only entry survives the cache round trip')
 assert.equal(fallback.entries[0].credits, undefined, 'and still carries no stale rate')
 
-console.log('catalog-cache.mjs: OK — append, metadata preservation, per-deployment files, structural read-time filtering, and the config-only fallback verified')
+// ── seven-day expiry, on the entry's own lastSeen ─────────────────────────────
+//
+// The live read is allowed to be thinner than reality: the international
+// `/v3/config` listed 28 models and omitted `step-5-preview` (2026-10-26) while
+// that model still answered a chat request. So an entry the read stopped
+// mentioning stays — but not forever, and not on the snapshot's clock.
+
+const EIGHT_DAYS_MS = 8 * 24 * 3600_000
+
+// A model the deployment stops listing: `step-5-preview` is written once, then
+// never again. Every later write must keep it for a week of its own silence.
+writeCatalogCache('ttl', 'config', [
+  { id: 'step-5-preview', name: 'Step-5-Preview', official: false, preset: false },
+  { id: 'hy3', name: 'Hy3', official: true, preset: false }
+])
+// Backdate `step-5-preview`'s own lastSeen, leaving `hy3` as it is: only the
+// silent one may expire.
+const ttlPath = join(process.env.DSH_HOME, 'dsh-workbuddy', 'catalog-ttl.json')
+const snapshot = JSON.parse(readFileSync(ttlPath, 'utf8'))
+snapshot.entries = snapshot.entries.map((entry) => entry.id === 'step-5-preview'
+  ? { ...entry, lastSeen: Date.now() - EIGHT_DAYS_MS }
+  : entry)
+writeFileSync(ttlPath, JSON.stringify(snapshot))
+
+// The live read still lists `hy3` only. `step-5-preview` has been silent for
+// eight days, so this write drops it.
+writeCatalogCache('ttl', 'config', [{ id: 'hy3', name: 'Hy3', official: true, preset: false }])
+const expired = readCatalogCache('ttl')
+assert.ok(expired.entries.some((entry) => entry.id === 'hy3'), 'a model the read still lists stays')
+assert.ok(!expired.entries.some((entry) => entry.id === 'step-5-preview'), 'an entry silent for eight days is dropped')
+
+// Six days of silence is inside the TTL: the entry survives, which is what keeps
+// a temporarily thin upstream answer from shrinking the list.
+writeCatalogCache('ttl2', 'config', [
+  { id: 'step-5-preview', name: 'Step-5-Preview', official: false, preset: false },
+  { id: 'hy3', name: 'Hy3', official: true, preset: false }
+])
+const ttl2Path = join(process.env.DSH_HOME, 'dsh-workbuddy', 'catalog-ttl2.json')
+const snapshot2 = JSON.parse(readFileSync(ttl2Path, 'utf8'))
+snapshot2.entries = snapshot2.entries.map((entry) => entry.id === 'step-5-preview'
+  ? { ...entry, lastSeen: Date.now() - 6 * 24 * 3600_000 }
+  : entry)
+writeFileSync(ttl2Path, JSON.stringify(snapshot2))
+writeCatalogCache('ttl2', 'config', [{ id: 'hy3', name: 'Hy3', official: true, preset: false }])
+assert.ok(readCatalogCache('ttl2').entries.some((entry) => entry.id === 'step-5-preview'), 'six days of silence is inside the TTL')
+
+// The expiry reads the entry's own `lastSeen`, never the snapshot's `savedAt`:
+// a read that mentions *other* models must not keep a silent one alive.
+writeCatalogCache('ttl3', 'config', [
+  { id: 'kimi-k2.6', name: 'Kimi-K2.6', official: false, preset: false },
+  { id: 'hy3', name: 'Hy3', official: true, preset: false }
+])
+const ttl3Path = join(process.env.DSH_HOME, 'dsh-workbuddy', 'catalog-ttl3.json')
+const snapshot3 = JSON.parse(readFileSync(ttl3Path, 'utf8'))
+snapshot3.entries = snapshot3.entries.map((entry) => entry.id === 'kimi-k2.6'
+  ? { ...entry, lastSeen: Date.now() - EIGHT_DAYS_MS }
+  : entry)
+writeFileSync(ttl3Path, JSON.stringify(snapshot3))
+writeCatalogCache('ttl3', 'config', [{ id: 'hy3', name: 'Hy3', official: true, preset: false }])
+assert.ok(!readCatalogCache('ttl3').entries.some((entry) => entry.id === 'kimi-k2.6'), 'a read of other models does not refresh a silent entry')
+
+// A snapshot written before the TTL existed still expires on read, because the
+// cache may sit unread for a long time (it is consulted only when both live
+// sources fail) — and on read `lastSeen` is gone, so `savedAt` stands in.
+writeCatalogCache('ttl4', 'config', [{ id: 'step-5-preview', name: 'Step-5-Preview', official: false, preset: false }])
+const ttl4Path = join(process.env.DSH_HOME, 'dsh-workbuddy', 'catalog-ttl4.json')
+const snapshot4 = JSON.parse(readFileSync(ttl4Path, 'utf8'))
+snapshot4.savedAt = Date.now() - EIGHT_DAYS_MS
+snapshot4.entries = snapshot4.entries.map((entry) => {
+  const bare = { ...entry }
+  delete bare.lastSeen
+  return bare
+})
+writeFileSync(ttl4Path, JSON.stringify(snapshot4))
+assert.equal(readCatalogCache('ttl4'), undefined, 'a legacy snapshot whose only entry is long gone reads as no cache at all')
+
+console.log('catalog-cache.mjs: OK — append, metadata preservation, per-deployment files, structural read-time filtering, the config-only fallback, and the seven-day lastSeen expiry verified')
