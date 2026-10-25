@@ -100,21 +100,30 @@ export function classifyProbe(status, body) {
   }
   if (status === 401 || status === 403) return { state: 'auth', detail: `凭据被拒（HTTP ${status}）` }
   if (status >= 500) return { state: 'down', detail: `上游故障（HTTP ${status}）` }
-  // `429` is three different answers and only one of them is "usable later today":
+  // `429` is four different answers and only two of them say the model can be used later
+  // today by this account:
   //
   //  - queue (`6020`) — the model is busy; the next attempt may well succeed, so it stays
   //    in the usable group. Handled above, before this branch.
+  //  - plain "model busy" wording (`模型繁忙，请换模型或稍后重试 too many requests`) — busy
+  //    without a queue, and equally transient. Handled in the 429 branch below.
   //  - credits exhausted (`14018`) — nothing works until someone pays.
   //  - rate window used up (`6004` / `exceeds frequency limit`) — nothing works until the
   //    stated reset, which is hours away.
   //
-  // The last two were `busy` too, so a panel full of throttled models sat in 可用 with a
-  // grey 未知 chip. They are verdicts, not guesses: the account cannot call them now.
+  // The last two are verdicts, not guesses: the account cannot call them now. A bare `429`
+  // with none of those wordings stays `error` — unknown, retryable — because claiming a
+  // rate window the body never stated would be exactly the misread reported on 2026-10-25.
   if (status === 429) {
     if (/14018|credits exhausted|insufficient_quota/i.test(text)) {
       return { state: 'noquota', detail: '积分已用尽（HTTP 429 code 14018）' }
     }
-    return { state: 'throttled', detail: `频率超限（HTTP 429${/6004/.test(text) ? ' code 6004' : ''}）` }
+    if (/模型繁忙|模型正忙|model (?:is )?(?:currently )?busy/i.test(text)) {
+      return { state: 'busy', detail: '模型繁忙（稍后重试）' }
+    }
+    if (/6004|exceeds frequency limit|usage exceeds|超出频率限制|频率限制|reset at/i.test(text)) {
+      return { state: 'throttled', detail: `频率超限（HTTP 429${/6004/.test(text) ? ' code 6004' : ''}）` }
+    }
   }
   if (status === 200) return { state: 'ok', detail: '' }
   if (status >= 400 && status < 500) {

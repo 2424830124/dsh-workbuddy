@@ -16,6 +16,11 @@
 > 它只是一个第三方客户端插件，按公开可观测的接口工作。请自行确认使用方式符合你所在地区的
 > 法律与 WorkBuddy 的服务条款。仓库里不含任何真实账号数据——示例与截图一律是假数据。
 
+> **强烈建议配合 [dsh-model-picker](https://github.com/2424830124/dsh-model-picker) 一起使用。**
+> 这是同一个作者的另一个插件，它读取本插件发布的客户端状态服务，在模型选择器里直接显示
+> 每个部署的实时积分、模型的探测结论、繁忙状态与实时倍率——不用打开设置页就能挑模型、看状态。
+> 两个插件都装上即可联动，无需任何配置。
+
 ## 安装
 
 ```sh
@@ -26,8 +31,6 @@ dsh plugin --profile <profile> add @huai_xin/dsh-workbuddy
 也可以在 Web UI 的插件管理里安装（效果相同）。
 
 装完**重启 DSH**，然后 `/workbuddy login cn` 或 `/workbuddy login intl` 授权。
-
-npm 页面：<https://www.npmjs.com/package/@huai_xin/dsh-workbuddy>
 
 ## 用法
 
@@ -50,7 +53,7 @@ npm 页面：<https://www.npmjs.com/package/@huai_xin/dsh-workbuddy>
 ### 与 dsh-model-picker 联动
 
 本插件会向客户端发布一个状态服务（`@huai_xin/dsh-workbuddy/state`），我的
-[dsh-model-picker](https://www.npmjs.com/package/@huai_xin/dsh-model-picker) 插件读取它，
+[dsh-model-picker](https://github.com/2424830124/dsh-model-picker) 插件读取它，
 在模型选择器里做两件事：
 
 - **显示积分**：每个部署的实时余额直接出现在选择器里，不用打开设置页；

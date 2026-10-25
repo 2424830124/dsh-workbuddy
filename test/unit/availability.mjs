@@ -83,6 +83,14 @@ assert.equal(
   'throttled'
 )
 assert.equal(classifyProbe(429, '{"code":429,"msg":"usage exceeds frequency limit"}').state, 'throttled')
+// Busy without a queue, and a bare 429 with no window wording at all: neither states a rate
+// window, so neither may claim one (measured 2026-10-25 — the model-busy text used to be
+// reported as an account rate window).
+assert.equal(classifyProbe(429, '{"code":429,"msg":"模型繁忙，请换模型或稍后重试 too many requests"}').state, 'busy', 'plain model-busy wording is transient')
+// A bare 429 with no window wording reaches the parameter layer, which *proves the model is
+// routed* — the same "any other 4xx" rule as above — so it reads ok rather than claiming a
+// window the body never stated.
+assert.equal(classifyProbe(429, '{"code":429,"msg":"too many requests"}').state, 'ok', 'a bare 429 proves nothing about a window, only that the model exists')
 assert.notEqual(classifyProbe(429, '{"error":{"data":{"code":14018,"msg":"Credits exhausted."}}}').state, 'busy', 'exhausted is never queued')
 assert.equal(classifyProbe(400, '{"code":11128,"msg":"Illegal API invocation from an unapproved channel"}').state, 'blocked')
 assert.equal(classifyProbe(401, 'nope').state, 'auth')

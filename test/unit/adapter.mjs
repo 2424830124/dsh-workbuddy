@@ -270,6 +270,26 @@ assert.match(mainland.message, /频率超限/)
 assert.match(mainland.message, /2026-10-24 09:54:53 UTC\+8/, 'the reset time survives, timezone included')
 assert.match(mainland.message, /换用其它模型/, 'and the suggestion is recognised in Chinese too')
 
+// Busy *without* a queue: the overseas deployment answers a bare 429 whose text names the
+// model, not the account (measured 2026-10-25: 模型繁忙，请换模型或稍后重试 too many requests).
+// The gateway's own advice is "稍后重试", so this is transient — RATE_LIMIT, retried by the
+// harness. It used to fall into the rate-window branch, which reported the account quota as
+// gone for a hitch that lasts seconds.
+const busy = await exhausted(429, JSON.stringify({
+  code: 429,
+  msg: '模型繁忙，请换模型或稍后重试 too many requests',
+  requestId: 'x'
+}), 'RATE_LIMIT')
+assert.match(busy.message, /模型繁忙/)
+assert.match(busy.message, /自动重试/)
+assert.ok(!busy.message.includes('频率'), 'and it is not presented as a rate window')
+assert.ok(!busy.message.includes('重置'), 'with no reset time, because none was stated')
+
+// A bare 429 with none of the window's wordings is not proof of a window either: it stays a
+// plain RATE_LIMIT instead of claiming a quota problem the body never stated.
+const bare = await exhausted(429, JSON.stringify({ code: 429, msg: 'too many requests' }), 'RATE_LIMIT')
+assert.ok(!bare.message.includes('频率超限'))
+
 // ---------------------------------------------------------------------------
 // How a stream ends decides whether a short answer is retried or silently kept.
 //

@@ -167,22 +167,33 @@ function queueNotice(body) {
 /**
  * One non-2xx response → the LlmError the retry policy classifies.
  *
- * Three things arrive as `429` and they are not the same:
+ * Four things arrive as `429` and they are not the same:
  *
- * - `6020 queue.waiting.title` — the model is busy. Retrying helps, so `RATE_LIMIT`.
+ * - `6020 queue.waiting.title` — the model is busy, with a queue position. Retrying helps,
+ *   so `RATE_LIMIT`.
+ * - plain "model busy" wording (`模型繁忙，请换模型或稍后重试 too many requests`, measured
+ *   2026-10-25 on the overseas deployment) — the model is busy **without** a queue. Also
+ *   transient: the gateway itself says "稍后重试", so `RATE_LIMIT`. (It used to fall into the
+ *   rate-window branch below, which told the user their account quota was gone when the model
+ *   would have answered a second later.)
  * - `14018 Credits exhausted` — the balance is empty. No amount of backoff refills it, and
  *   retrying only delays the honest answer by the full budget (five attempts, up to ten
  *   seconds apart). `QUOTA`, which the harness does not retry.
  * - `usage exceeds frequency limit…reset at <time>` — the account's window is used up until
  *   a stated time. Same argument: waiting out five retries cannot cross that window, so
- *   `QUOTA` as well. (It was `RATE_LIMIT` before, which made a free-tier user watch five
- *   pointless retries for a limit that resets tomorrow.)
+ *   `RATE_WINDOW_EXCEEDED`, shown verbatim and not retried.
  */
 function requestFailure(provider, status, body) {
   const queue = queueNotice(body)
   if (queue !== undefined) {
     const position = queue.position === undefined ? '' : `（队列第 ${queue.position} 位）`
     return llmError(`${provider}: 模型排队中${position}，将自动重试`, 'RATE_LIMIT', { status })
+  }
+  // Busy without a queue: the gateway says so in plain words, on both deployments, and its own
+  // advice is "稍后重试". Transient, so retryable — and it must be tested *before* the window
+  // branch, which any bare `429` would otherwise swallow.
+  if (/模型繁忙|模型正忙|model (?:is )?(?:currently )?busy/i.test(body)) {
+    return llmError(`${provider}: 模型繁忙，将自动重试（不是插件或网络问题）；上游原文：${errorDetail(body).slice(0, 200)}`, 'RATE_LIMIT', { status })
   }
   // Balance exhausted: the message is worth passing through verbatim, because it names the
   // page where credits are bought. Not retryable — an empty balance stays empty.
@@ -193,7 +204,9 @@ function requestFailure(provider, status, body) {
     return llmError(`${provider}: 积分已用尽，请到上游充值后再试（不是插件或网络问题）；上游原文：${errorDetail(body).slice(0, 200)}`, 'QUOTA', { status })
   }
   // The account's rate window is used up until a stated time. Not retryable: the reset is
-  // hours away, not backoff-length away.
+  // hours away, not backoff-length away. The *stated time* (or its code) is what makes it a
+  // window — a bare `429` with neither reset wording nor `6004` is not proof of one, so it
+  // falls through to the generic `RATE_LIMIT` below rather than claiming a quota problem.
   //
   // The mainland deployment says it in Chinese (`6004 您的使用量已超出频率限制，将在 <时间>
   // 重置`), the overseas one in English; matching only one language left the other falling
@@ -204,7 +217,7 @@ function requestFailure(provider, status, body) {
   // renders a `QUOTA` failure as its own fixed "当前请求的额度已用尽" — which would tell the
   // user to buy credits for something that resets by itself. An unlisted code is shown
   // verbatim and is not in the retryable set, which is exactly what this needs.
-  if (status === 429 || /6004|exceeds frequency limit|usage exceeds|超出频率限制|频率限制/i.test(body)) {
+  if (/6004|exceeds frequency limit|usage exceeds|超出频率限制|频率限制|reset at/i.test(body)) {
     // The reset time is written "2026-10-24 09:54:53 UTC+8" on both deployments.
     const reset = /((?:19|20)\d\d-\d\d-\d\d[ T]\d\d:\d\d:\d\d(?: ?(?:UTC|GMT)?[+-]\d{1,2}(?::?00)?)?)/.exec(body)?.[1]?.trim()
       ?? /reset at ([0-9T:.+\-Z ]+)/i.exec(body)?.[1]?.trim()
