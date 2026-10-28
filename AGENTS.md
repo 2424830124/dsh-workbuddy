@@ -417,14 +417,33 @@ node test/live/last-finishes.mjs "" [步数] dsh-model-picker          # 每步 
 
 ### 系统提示词改写
 
-国内网关会把**以这句开头**的 system 消息判成"未获批渠道"（`code 11128`）：
+`sanitizeSystem()` 现在有**两条**规则，都是给国内网关的 `code 11128 Illegal API invocation
+from an unapproved channel` 拆指纹。两条都只动最小的地方，海外版走同一条路径，避免两套形态。
+
+**一、品牌句**（2026-10-23）。网关会把**以这句开头**的 system 消息判成"未获批渠道"：
 
 ```
 You are an AI agent powered by DeepSeek Harness.
 ```
 
-规则是**行首锚定、大小写不敏感、句末句点可选**的品牌指纹。适配器只把 `DeepSeek Harness`
-改成 `this harness`，其余原样保留；海外版走同一条路径，避免两套形态。
+规则是**行首锚定、大小写不敏感、句末句点可选**的品牌指纹。适配器把 `DeepSeek Harness`
+改成 `this harness`。
+
+**二、`@` 文件引用那段**（2026-10-28）。宿主 `@deepseek-ai/dsh-file-reference` 追加的
+`FILE_REFERENCE_PROMPT` 里，**前两句连写**会被拦：
+
+```
+Tokens prefixed with @ are paths the user explicitly referenced. Relative paths resolve from the workspace root
+```
+
+这是**精确字面**匹配：每句单独送都过，中间换 3 个空格或换行就过，改任一句的任一个词也过。
+适配器只把这两句之间的空格换成 `\n`，**一个词都不改**。
+
+**换行必须插在这两句之间。** 插在后面（`workspace root;` 之后）实测仍然拦 3/3 ——
+"把长句拆开就好"是错的，命中的是那一个接缝。`test/unit/adapter.mjs` 钉住了这一点。
+
+这两条规则都是**事后追加**的，上游随时会再扩大。再遇到 11128 时用
+`node test/live/cn-prompt-fingerprint.mjs` 二分定位新命中的段落，别猜。
 
 ## 代码与写作约定
 

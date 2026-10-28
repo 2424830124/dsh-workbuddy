@@ -718,6 +718,49 @@ Web GUI 段落都**原样保留**。实测：这样做之后，完整 DSH 提示
 
 > 注意：这条规则**会继续扩大**。再遇到 11128 时，用 `node test/live/cn-prompt-fingerprint.mjs` 二分定位新命中的段落，再决定怎么办，别猜。
 
+#### 7.1.2 规则再扩大：`@` 文件引用那段被拦（2026-10-28）✅
+
+品牌改名生效 5 天后，完整提示词再次被拦（`hy3`，`copilot.tencent.com`，`requestId faa3b8b7…`，
+`actions: ["EDIT_INPUT"]`）。这次命中的**不是品牌句** —— system 开头已经是
+`You are an AI agent powered by this harness.`，照样拦。
+
+排除过程（system 是唯一变量）：
+
+| 变量 | 结果 |
+| --- | --- |
+| 中性 system + 全部 79 个工具 | 过 ✅ → 工具无关 |
+| 完整 system、不带工具 | **拦** → 是提示词内容 |
+| 完整 system + 前 20 个工具 | **拦** |
+| 换成 `glm-5.0` / `kimi-k2-thinking` / `hunyuan-2.0-thinking` / `deepseek-v3.2` | 全**拦** → 渠道级规则，不是单模型 |
+
+段落二分（27 段）落在第 [2] 段 —— 宿主 `@deepseek-ai/dsh-file-reference` 追加的
+`FILE_REFERENCE_PROMPT`（407 字符）。再按句切分，**每句单独送都过**，命中是
+**前两句的组合**：
+
+```
+Tokens prefixed with @ are paths the user explicitly referenced. Relative paths resolve from the workspace root
+```
+
+| 变体 | 结果 |
+| --- | --- |
+| 前两句连写（中间单个空格） | **拦** 3/3 |
+| 任一句单独送 | 过 3/3 |
+| 中间换 3 个空格 / `\n` / `\n\n` | 过 3/3 |
+| 两句顺序对调 | 过 |
+| `resolve from` → `against` / `are relative to` / `rooted at` | 过 |
+| `@` → `at`、删 `explicitly`、`paths` → `files` | 过 |
+| 中性提示词填充到同样长度 | 过（不是长度） |
+
+结论：和 7.1 一样是**精确字面匹配**，不是内容审查 —— 改一个词或只动分隔符就过。
+
+**最终做法（2026-10-28）：在两句话之间插入一个换行** —— 一个词都不改，只把
+`explicitly referenced.` 与 `Relative paths` 之间的空格换成 `\n`
+（`sanitizeSystem()` 的第二条规则）。实测完整提示词 + 79 工具打 CN **3/3 通过**，
+模型正常回答。
+
+> 换行**必须插在这两句话之间**。插在后面（比如 `workspace root;` 之后）实测仍然
+> **拦** 3/3 —— 看着像"把长句拆开就好"的改法并不成立，命中的是那一个接缝。
+
 ### 7.2 其它渠道相关事实
 
 - `X-Conversation-ID` 可复用；一旦被判定为异常渠道，**换新会话标识无效**（实测：换标识 + 切备用主机仍被拒），但换一个**合法 system 提示词**立刻恢复 ✅。

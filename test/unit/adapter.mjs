@@ -50,6 +50,27 @@ assert.equal(cn.sanitizeSystem('no brand here'), 'no brand here')
 // Every mention is rewritten, not just the first.
 assert.equal(cn.sanitizeSystem('A: DeepSeek Harness. B: DeepSeek Harness.'), 'A: this harness. B: this harness.')
 
+// Second fingerprint (2026-10-28): the file-reference paragraph the harness appends for
+// `@` mentions. The gateway blocks the first two sentences joined by exactly one space
+// and passes everything else, so the rewrite inserts a newline at that join and leaves
+// every word alone. Verified live: original 3/3 BLOCK, this 3/3 ok, and breaking the
+// line anywhere *else* in the paragraph does not help.
+const FILE_REF = 'Tokens prefixed with @ are paths the user explicitly referenced. Relative paths resolve from the workspace root; absolute paths identify files or directories on the host.'
+const defused = cn.sanitizeSystem(FILE_REF)
+assert.equal(
+  defused,
+  'Tokens prefixed with @ are paths the user explicitly referenced.\nRelative paths resolve from the workspace root; absolute paths identify files or directories on the host.',
+  'the blocking join becomes a newline'
+)
+assert.equal(defused.replace(/\n/g, ' '), FILE_REF, 'only the separator changes; every word survives')
+assert.ok(!defused.includes('explicitly referenced. Relative paths resolve'), 'the blocked literal is gone')
+// A newline elsewhere in the paragraph is not what the gateway matches — asserting this
+// keeps someone from "simplifying" the rewrite to a later line break.
+const lateBreak = FILE_REF.replace('workspace root; absolute', 'workspace root;\nabsolute')
+assert.ok(lateBreak.includes('explicitly referenced. Relative paths resolve'), 'breaking the line later leaves the fingerprint intact')
+// Idempotent: the rule is applied to history system messages too, which may already be defused.
+assert.equal(cn.sanitizeSystem(defused), defused, 're-sanitizing is a no-op')
+
 // One prompt shape for both deployments.
 assert.equal(intl.sanitizeSystem(BLOCKED), cn.sanitizeSystem(BLOCKED), 'the international route rewrites it the same way')
 

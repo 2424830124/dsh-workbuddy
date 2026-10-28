@@ -3,3 +3,5 @@ node_modules/
 *.tgz
 debug.log
 .client-log.jsonl
+# Scratch space of the harness memory plugin; per-machine, never part of the plugin.
+.memory/
