@@ -126,11 +126,11 @@ const developerBody = cn.buildBody({
 }, 'hy3', undefined, undefined)
 assert.ok(developerBody.messages.some((message) => message.role === 'system' && message.content === 'dev rules'))
 
-// China chats through the CodeBuddy China gateway; the web host stays as fallback.
+// China chats through the web host first; the CodeBuddy gateway stays as fallback.
 const routes = cn.routes()
-assert.equal(routes[0].endpoint, 'https://copilot.tencent.com')
+assert.equal(routes[0].endpoint, 'https://www.workbuddy.cn')
 assert.equal(routes[0].productCode, 'workbuddy')
-assert.equal(routes[1].endpoint, 'https://www.workbuddy.cn')
+assert.equal(routes[1].endpoint, 'https://copilot.tencent.com')
 assert.equal(intl.routes().length, 1, 'the international deployment has a single route')
 assert.equal(intl.routes()[0].endpoint, 'https://www.workbuddy.ai')
 

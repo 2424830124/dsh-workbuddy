@@ -2,10 +2,13 @@
  * The two WorkBuddy deployments and the little that is shared about them.
  *
  * Login, catalog and billing live on the web host of each deployment; chat
- * lives wherever that deployment's model gateway answers. China's web host
- * refuses harness traffic on `/v2/chat/completions` ("Illegal API invocation
- * from an unapproved channel"), so its chat runs on the CodeBuddy China
- * gateway instead, with the web host kept as the fallback route.
+ * lives wherever that deployment's model gateway answers. China used to be the
+ * exception: its web host refused harness traffic on `/v2/chat/completions`
+ * ("Illegal API invocation from an unapproved channel"), so chat ran on the
+ * CodeBuddy China gateway with the web host kept as the fallback route.
+ * Measured again 2026-11-03, the web host answers that path with a normal SSE
+ * stream and no 11128, so the order is flipped — web host first, the CodeBuddy
+ * gateway kept as the fallback.
  */
 
 import { spawn } from 'node:child_process'
@@ -38,8 +41,14 @@ export const REGIONS = {
     label: 'WorkBuddy 大陆版',
     endpoint: 'https://www.workbuddy.cn',
     apiDomain: 'www.workbuddy.cn',
-    chatEndpoint: 'https://copilot.tencent.com',
-    chatApiDomain: 'copilot.tencent.com',
+    // Chat route order, primary first. Measured 2026-11-03: the web host answers
+    // `/v2/chat/completions` with a normal SSE stream and no 11128, so it leads.
+    // The CodeBuddy China gateway stays as the fallback route — it is what carried
+    // every chat before that measurement.
+    chatEndpoints: [
+      { endpoint: 'https://www.workbuddy.cn', apiDomain: 'www.workbuddy.cn' },
+      { endpoint: 'https://copilot.tencent.com', apiDomain: 'copilot.tencent.com' }
+    ],
     platform: 'workbuddy',
     userAgent: 'WorkBuddy/5.5.2 WorkBuddy/5.5.2 CLI/5.5.2',
     version: '5.5.2',
@@ -100,25 +109,22 @@ export function sitePageUrl(region, page) {
   return `${region.endpoint}${path}`
 }
 
-/** Chat routes in preference order: the gateway first, the web host as fallback. */
+/** Chat routes in preference order: the web host first, the gateway as fallback. */
 export function chatRoutes(region) {
-  const primary = {
-    endpoint: region.chatEndpoint ?? region.endpoint,
-    apiDomain: region.chatApiDomain ?? region.apiDomain,
+  const build = (endpoint, apiDomain) => ({
+    endpoint,
+    apiDomain,
     productCode: 'workbuddy',
     ideName: 'WorkBuddy',
     ideVersion: region.version,
     userAgent: region.userAgent
+  })
+  if (Array.isArray(region.chatEndpoints) && region.chatEndpoints.length > 0) {
+    return region.chatEndpoints.map((route) => build(route.endpoint, route.apiDomain))
   }
+  const primary = build(region.chatEndpoint ?? region.endpoint, region.chatApiDomain ?? region.apiDomain)
   if (region.chatEndpoint === undefined || region.chatEndpoint === region.endpoint) return [primary]
-  return [primary, {
-    endpoint: region.endpoint,
-    apiDomain: region.apiDomain,
-    productCode: 'workbuddy',
-    ideName: 'WorkBuddy',
-    ideVersion: region.version,
-    userAgent: region.userAgent
-  }]
+  return [primary, build(region.endpoint, region.apiDomain)]
 }
 
 /**

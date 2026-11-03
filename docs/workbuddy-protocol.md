@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | Web 应用 | `https://www.workbuddy.ai/app` | `https://www.workbuddy.cn/app` |
 | 插件端点（登录/目录/计费） | `https://www.workbuddy.ai` | `https://www.workbuddy.cn` |
-| 聊天主机 ✅ | `https://www.workbuddy.ai` | `https://copilot.tencent.com`（CodeBuddy 中国网关；web 主机对 harness 流量回 11128） |
+| 聊天主机 ✅ | `https://www.workbuddy.ai` | `https://www.workbuddy.cn`（2026-11-03 起为主路由，实测正常 SSE）；备用 `https://copilot.tencent.com`（CodeBuddy 中国网关） |
 | `auth/state` 的 `platform` | `workbuddy-ai` | `workbuddy` |
 | 默认 UA ✅ | `WorkBuddy/5.5.2 WorkBuddy AI/5.5.2 CLI/5.5.2` | `WorkBuddy/5.5.2 WorkBuddy/5.5.2 CLI/5.5.2` |
 | `X-Product-Code` ✅ | `workbuddy` | `workbuddy`（`codebuddy` 也被接受） |
@@ -155,7 +155,7 @@ POST <chatEndpoint>/v2/chat/completions
 | `Authorization` | `Bearer <accessToken>` |
 | `Accept` | `text/event-stream` |
 | `Content-Type` | `application/json` |
-| `X-Domain` | 聊天主机域名，例 `copilot.tencent.com` / `www.workbuddy.ai` |
+| `X-Domain` | 聊天主机域名，例 `www.workbuddy.cn` / `www.workbuddy.ai`（CN 备用路由是 `copilot.tencent.com`） |
 | `X-Product` | `SaaS`（部署类型，两部署同值 📖） |
 | `X-Product-Code` | `workbuddy` |
 | `X-Agent-Purpose` | `conversation` |
@@ -452,7 +452,7 @@ POST /v2/chat/busy            Authorization: Bearer <token>   Content-Type: appl
 | 实时繁忙度 `POST /v2/chat/busy` | ✅ 200，插件令牌可用 | ❌ `404 Route Not Found` |
 | 前端是否有繁忙度 UI | 有：`model.busy.{label,idle,busy,congested,unavailable}` + `busyLevel` 字段 + 50 个一批的 `/v2/chat/busy` 调用 | **无**：`download.codebuddy.ai` 的 chunk 里搜不到 `model.busy.`、`busyLevel`、任何 `busy` 路径 |
 | 前端思考档位词表 | `low / medium / high / xhigh / max` → 低/中/高/超高/极致 | 多一个 **`model.effort.minimal.label`**（minimal 档），其余同名 |
-| 目录自报的聊天端点 | `data.endpoint = https://copilot.tencent.com` ✅（官方自己就这么写，与我们的路由一致）；另有 `data.stagingEndpoint = https://staging-copilot.tencent.com` | — |
+| 目录自报的聊天端点 | `data.endpoint = https://copilot.tencent.com` ✅（官方自己就这么写；我们 2026-11-03 起主路由改走 `www.workbuddy.cn`，它只当备用）；另有 `data.stagingEndpoint = https://staging-copilot.tencent.com` | — |
 | 其他产品级字段 | `mergeStrategy: "merge"`、`productFeatures`（`AutoMode` / `BillingNotice` / `CustomModelsJSON` / `DeferToolLoading` / `EnableAppearace` / `EnableAutoModelTiers` / `EnableIoaWecomCooperation` / `ImageGen` / `RequestBodyGzip` / `TodoAssistantDelegate`）、`links` | — |
 
 **结论**：两边的字段**同名同义**，业务逻辑可以共用一套读取代码；差异集中在「有没有」和「覆盖率」上，所以判断"这个字段能不能用"必须按模型逐个判空，不能按部署假设。
@@ -915,7 +915,7 @@ provider 与全部 HTTP 路由都没注册，设置面板只剩一个 `HTTP 404`
 
 | 方面 | 官方 CLI | 本插件 | DSH |
 | --- | --- | --- | --- |
-| 端点 | 自定义/默认 URL + `/chat/completions`（CN 默认即 `copilot.tencent.com` ✓ 我们早就在用） | CN `copilot.tencent.com/v2/chat/completions`，失败回退 `workbuddy.cn`；INTL `workbuddy.ai/v2/chat/completions` | 由适配器注册的 provider 决定 |
+| 端点 | 自定义/默认 URL + `/chat/completions`（CN 默认即 `copilot.tencent.com`） | CN `www.workbuddy.cn/v2/chat/completions`（主路由，2026-11-03 起），失败回退 `copilot.tencent.com`；INTL `workbuddy.ai/v2/chat/completions` | 由适配器注册的 provider 决定 |
 | `temperature` / `top_p` / `frequency_penalty` / `presence_penalty` | **总是发**（模型配置值，缺省用 `DEFAULT_TEMPERATURE`） | **不发**（仅当调用方传 `options.temperature`） | 类型里有 `LlmCallControls.temperature`，但没有设置入口 ⇒ 实际永远为空 |
 | `max_tokens` | 总是发（模型配置） | 发（调用方 `maxTokens`，否则目录 `maxOutputTokens`） | 提供 `maxTokens` |
 | `tool_choice` / `parallel_tool_calls` | 发 | 不发（走服务端默认 `auto`） | — |

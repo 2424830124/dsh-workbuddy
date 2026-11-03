@@ -13,7 +13,7 @@
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
-import { REGIONS } from '../../src/core/regions.js'
+import { REGIONS, chatRoutes } from '../../src/core/regions.js'
 
 const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
 const text = readFileSync(credentialsPath, 'utf8')
@@ -26,13 +26,14 @@ const intlToken = tokenOf('WORKBUDDY_INTL_TOKEN')
 const tampered = `${intlToken.slice(0, -4)}AAAA`
 
 async function chat(region, token, model, body = {}) {
-  const response = await fetch(`${region.chatEndpoint ?? region.endpoint}/v2/chat/completions`, {
+  const route = chatRoutes(region)[0]
+  const response = await fetch(`${route.endpoint}/v2/chat/completions`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: 'text/event-stream',
       'Content-Type': 'application/json',
-      'X-Domain': region.chatApiDomain ?? region.apiDomain,
+      'X-Domain': route.apiDomain,
       'X-Product': 'SaaS',
       'X-Product-Code': 'workbuddy',
       'X-Agent-Purpose': 'conversation',
