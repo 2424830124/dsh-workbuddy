@@ -1,0 +1,165 @@
+/**
+ * The two WorkBuddy deployments and the little that is shared about them.
+ *
+ * Login, catalog and billing live on the web host of each deployment; chat
+ * lives wherever that deployment's model gateway answers. China used to be the
+ * exception: its web host refused harness traffic on `/v2/chat/completions`
+ * ("Illegal API invocation from an unapproved channel"), so chat ran on the
+ * CodeBuddy China gateway with the web host kept as the fallback route.
+ * Measured again 2026-11-03, the web host answers that path with a normal SSE
+ * stream and no 11128, so the order is flipped — web host first, the CodeBuddy
+ * gateway kept as the fallback.
+ */
+
+import { spawn } from 'node:child_process'
+
+export const REGIONS = {
+  intl: {
+    id: 'intl',
+    label: 'WorkBuddy 海外版',
+    endpoint: 'https://www.workbuddy.ai',
+    apiDomain: 'www.workbuddy.ai',
+    platform: 'workbuddy-ai',
+    userAgent: 'WorkBuddy/5.5.2 WorkBuddy AI/5.5.2 CLI/5.5.2',
+    version: '5.5.2',
+    provider: '@huai_xin/dsh-workbuddy/intl',
+    displayName: 'WorkBuddy (Overseas)',
+    tokenRef: 'WORKBUDDY_INTL_TOKEN',
+    metaRef: 'WORKBUDDY_INTL_ACCOUNT',
+    // This gateway validates the conversation before the model, so only a
+    // well-formed request reaches the checks worth making — and against a usable
+    // model that starts a completion. Probes here cost a token or two, hence a
+    // daily automatic sweep at most (measured 2026-10-21, §4.9).
+    freeProbe: false,
+    autoProbeIntervalMs: 24 * 3600_000,
+    // No per-model load endpoint here (`POST /v2/chat/busy` answers 404), so the
+    // panel hides the busy column on this deployment.
+    hasBusy: false
+  },
+  cn: {
+    id: 'cn',
+    label: 'WorkBuddy 大陆版',
+    endpoint: 'https://www.workbuddy.cn',
+    apiDomain: 'www.workbuddy.cn',
+    // Chat route order, primary first. Measured 2026-11-03: the web host answers
+    // `/v2/chat/completions` with a normal SSE stream and no 11128, so it leads.
+    // The CodeBuddy China gateway stays as the fallback route — it is what carried
+    // every chat before that measurement.
+    chatEndpoints: [
+      { endpoint: 'https://www.workbuddy.cn', apiDomain: 'www.workbuddy.cn' },
+      { endpoint: 'https://copilot.tencent.com', apiDomain: 'copilot.tencent.com' }
+    ],
+    platform: 'workbuddy',
+    userAgent: 'WorkBuddy/5.5.2 WorkBuddy/5.5.2 CLI/5.5.2',
+    version: '5.5.2',
+    provider: '@huai_xin/dsh-workbuddy/cn',
+    displayName: 'WorkBuddy (Mainland)',
+    tokenRef: 'WORKBUDDY_CN_TOKEN',
+    metaRef: 'WORKBUDDY_CN_ACCOUNT',
+    // Resolves the model before it validates the conversation, so an empty
+    // `messages` array is answered without ever starting a completion — which is
+    // why this deployment may probe as often as the panel is opened.
+    freeProbe: true,
+    autoProbeIntervalMs: 10 * 60_000,
+    // This is the deployment that publishes per-model load.
+    hasBusy: true
+  }
+}
+
+/**
+ * Display order: the mainland deployment first, the overseas one second. This
+ * drives every place the two are listed side by side — the tab strip and the
+ * account table's columns.
+ */
+export const REGION_IDS = ['cn', 'intl']
+
+function regionOf(id) {
+  return REGIONS[String(id ?? '').toLowerCase()] ?? undefined
+}
+
+/** `''` / `all` / `both` select every deployment; anything else must name one. */
+export function regionList(raw) {
+  const value = String(raw ?? '').trim().toLowerCase()
+  if (value.length === 0 || value === 'all' || value === 'both') return REGION_IDS.map((id) => REGIONS[id])
+  const region = regionOf(value)
+  return region === undefined ? [] : [region]
+}
+
+/**
+ * Site pages the panel may ask the user's browser to open.
+ *
+ * A fixed list on purpose: the panel sends a page *name*, never a URL, so a
+ * compromised or careless client cannot make the host open an arbitrary address
+ * (or a different host) through this route.
+ */
+export const SITE_PAGES = {
+  plans: '/profile/plans-usage'
+}
+
+/**
+ * Resolve one allowed site page for a deployment.
+ *
+ * @param {object} region - entry from `REGIONS`.
+ * @param {string} page - key from `SITE_PAGES`.
+ * @returns {string|undefined} absolute URL, or `undefined` when the pair is unknown.
+ */
+export function sitePageUrl(region, page) {
+  const path = SITE_PAGES[String(page ?? '').toLowerCase()]
+  if (region === undefined || path === undefined) return undefined
+  return `${region.endpoint}${path}`
+}
+
+/** Chat routes in preference order: the web host first, the gateway as fallback. */
+export function chatRoutes(region) {
+  const build = (endpoint, apiDomain) => ({
+    endpoint,
+    apiDomain,
+    productCode: 'workbuddy',
+    ideName: 'WorkBuddy',
+    ideVersion: region.version,
+    userAgent: region.userAgent
+  })
+  if (Array.isArray(region.chatEndpoints) && region.chatEndpoints.length > 0) {
+    return region.chatEndpoints.map((route) => build(route.endpoint, route.apiDomain))
+  }
+  const primary = build(region.chatEndpoint ?? region.endpoint, region.chatApiDomain ?? region.apiDomain)
+  if (region.chatEndpoint === undefined || region.chatEndpoint === region.endpoint) return [primary]
+  return [primary, build(region.endpoint, region.apiDomain)]
+}
+
+/**
+ * Open a URL in the user's default browser.
+ *
+ * Windows needs the `cmd /c start "" "<url>"` form with
+ * `windowsVerbatimArguments`: the login URL carries `&`, and an unquoted
+ * argument list lets cmd.exe split it at the first `&` — the browser then
+ * receives a truncated link and WorkBuddy answers "登录链接不完整". Quoting keeps
+ * the whole query string inside one cmd token.
+ *
+ * Failure is not fatal: callers also surface the URL itself.
+ */
+export function openInBrowser(url) {
+  if (process.platform === 'win32') {
+    try {
+      const child = spawn('cmd', ['/c', 'start', '""', `"${url}"`], {
+        detached: true,
+        stdio: 'ignore',
+        windowsVerbatimArguments: true
+      })
+      child.on('error', () => {})
+      child.unref()
+      return true
+    } catch {
+      return false
+    }
+  }
+  const command = process.platform === 'darwin' ? 'open' : 'xdg-open'
+  try {
+    const child = spawn(command, [url], { detached: true, stdio: 'ignore' })
+    child.on('error', () => {})
+    child.unref()
+    return true
+  } catch {
+    return false
+  }
+}
