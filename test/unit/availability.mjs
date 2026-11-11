@@ -14,7 +14,9 @@ import { join } from 'node:path'
 process.env.DSH_HOME = join(tmpdir(), 'dsh-workbuddy-availability-test')
 rmSync(process.env.DSH_HOME, { recursive: true, force: true })
 
-const { AVAILABILITY_TTL_MS, availabilitySummary, classifyProbe, deadModelIds, probeBody, probeModel, readAvailability, runSweep, writeAvailability } = await import('../../src/catalog/availability.js')
+const { AVAILABILITY_TTL_MS, aggregateAvailability, availabilitySummary, classifyProbe, deadModelIds, probeBody, probeModel, readAvailability, runSweep, syncAutoOff, writeAvailability } = await import('../../src/catalog/availability.js')
+const { isEnabled, readPrefs, setEnabled } = await import('../../src/catalog/model-prefs.js')
+const { PRIMARY_ACCOUNT } = await import('../../src/account/pool.js')
 const { REGIONS, chatRoutes } = await import('../../src/core/regions.js')
 
 // A deployment is probed with **its own** credential and route, never the other
@@ -143,4 +145,34 @@ writeAvailability('acct', [{ id: 'glm-5.2', state: 'ok', detail: '', at: Date.no
 assert.equal(readAvailability('acct', 'account-b').models.size, 1, 'the new account only has its own probe')
 assert.ok(!readAvailability('acct', 'account-b').models.has('hy3'), 'the previous account denial is gone')
 
-console.log('availability.mjs: OK — probe classification, dead-in-TTL rule, merge, per-deployment ledgers, and per-account verdicts verified')
+// ---------------------------------------------------------------------------
+// 5. The sweep suspends what is unusable, and recovery puts the switch back.
+// ---------------------------------------------------------------------------
+
+// The rule the panel promises: an unusable model moves to the unusable group and is switched
+// off, and the day it answers again the switch is exactly where the user left it. That is why
+// the suspension is written next to the choice (`autoOff`) instead of deleting it.
+setEnabled('cn', ['hy3', 'glm-4.6'], true)
+writeAvailability('cn', [
+  { id: 'hy3', state: 'dead', detail: '模型不存在（11102 service info not found）', at: Date.now() },
+  { id: 'glm-4.6', state: 'ok', detail: '', at: Date.now() }
+])
+const suspendRun = syncAutoOff('cn', [PRIMARY_ACCOUNT])
+assert.equal(suspendRun.suspended, 1, 'only the unusable model of that account is suspended')
+assert.equal(isEnabled(readPrefs('cn'), 'hy3'), false, 'an unusable model is no longer offered')
+assert.equal(isEnabled(readPrefs('cn'), 'glm-4.6'), true, 'a usable one keeps its switch')
+assert.deepEqual([...readPrefs('cn').enabled].sort(), ['glm-4.6', 'hy3'], 'the choice itself is still recorded')
+
+// The model answers again: same switch, no user action.
+writeAvailability('cn', [{ id: 'hy3', state: 'ok', detail: '', at: Date.now() }])
+const resumeRun = syncAutoOff('cn', [PRIMARY_ACCOUNT])
+assert.equal(resumeRun.resumed, 1, 'a model that is usable again is released')
+assert.equal(isEnabled(readPrefs('cn'), 'hy3'), true, 'and the switch reads what the user had set')
+assert.deepEqual([...readPrefs('cn').autoOff], [], 'nothing is left suspended')
+
+// A suspension only counts while its verdict is valid.
+writeAvailability('cn', [{ id: 'hy3', state: 'dead', detail: '模型不存在', at: Date.now() - AVAILABILITY_TTL_MS - 1000 }])
+assert.equal(syncAutoOff('cn', [PRIMARY_ACCOUNT]).suspended, 0, 'a verdict past its TTL suspends nothing')
+assert.equal(isEnabled(readPrefs('cn'), 'hy3'), true)
+
+console.log('availability.mjs: OK — probe classification, dead-in-TTL rule, merge, per-deployment ledgers, per-account verdicts, and suspend-on-unusable/restore-on-recovery verified')

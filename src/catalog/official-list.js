@@ -25,12 +25,13 @@
  * File: `$DSH_HOME/cache/dsh-workbuddy/official-<region>.json`
  */
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { entryFromMeta, isAdvertisableId } from './catalog.js'
 import { ensurePluginDir } from '../core/paths.js'
+import { PRIMARY_ACCOUNT } from '../account/pool.js'
 
 const LIST_VERSION = 1
 
@@ -38,8 +39,17 @@ function listDir() {
   return ensurePluginDir()
 }
 
-function listPath(regionId) {
-  return join(listDir(), `official-${regionId}.json`)
+/**
+ * The file for one deployment's imported list.
+ *
+ * One file per account, keyed the same way the availability ledger is: an imported list
+ * is a statement about one account's entitlements, and with several accounts signed in
+ * the second capture used to overwrite the first one outright.
+ */
+function listPath(regionId, account) {
+  const id = typeof account === 'string' ? account : ''
+  const suffix = id.length === 0 || id === PRIMARY_ACCOUNT ? '' : `-${id.replace(/[^A-Za-z0-9_-]/g, '')}`
+  return join(listDir(), `official-${regionId}${suffix}.json`)
 }
 
 /**
@@ -57,12 +67,14 @@ function normalizeItem(item) {
 
 /** @returns {{ ids: string[], entries: object[], importedAt: number, from: string } | undefined} */
 export function readOfficialList(regionId, account) {
+  // Without an account the newest list of the deployment answers: that is what a caller
+  // that only wants "is anything imported here" means, and it keeps the pre-pool call
+  // shape working against a file that is now per account.
+  const target = account === undefined ? newestListPath(regionId) : listPath(regionId, account)
+  if (target === undefined) return undefined
   try {
-    const parsed = JSON.parse(readFileSync(listPath(regionId), 'utf8'))
+    const parsed = JSON.parse(readFileSync(target, 'utf8'))
     if (parsed?.version !== LIST_VERSION || !Array.isArray(parsed.ids)) return undefined
-    // An imported list is one account's entitlements; another account must not inherit
-    // it, or a freshly logged-in account would show the previous account's models.
-    if (account !== undefined && typeof parsed.account === 'string' && parsed.account !== account) return undefined
     const ids = parsed.ids.filter((id) => typeof id === 'string' && id.length > 0)
     if (ids.length === 0) return undefined
     const entries = Array.isArray(parsed.entries) ? parsed.entries : []
@@ -72,6 +84,29 @@ export function readOfficialList(regionId, account) {
       importedAt: typeof parsed.importedAt === 'number' ? parsed.importedAt : 0,
       from: typeof parsed.from === 'string' ? parsed.from : 'import'
     }
+  } catch {
+    return undefined
+  }
+}
+
+/** The most recently written list of a deployment, whichever account imported it. */
+function newestListPath(regionId) {
+  try {
+    const prefix = `official-${regionId}`
+    let best
+    let bestAt = -1
+    for (const name of readdirSync(listDir())) {
+      if (!name.startsWith(prefix) || !name.endsWith('.json')) continue
+      // `official-cn-acc-1.json` belongs to cn; `official-cnintl.json` does not.
+      const rest = name.slice(prefix.length, -'.json'.length)
+      if (rest.length > 0 && !rest.startsWith('-')) continue
+      const full = join(listDir(), name)
+      const at = statSync(full).mtimeMs
+      if (at <= bestAt) continue
+      best = full
+      bestAt = at
+    }
+    return best
   } catch {
     return undefined
   }
@@ -101,7 +136,7 @@ export function writeOfficialList(regionId, models, options = {}) {
     }
     if (byId.size === 0) {
       try {
-        renameSync(listPath(regionId), `${listPath(regionId)}.cleared-${Date.now()}`)
+        renameSync(listPath(regionId, options.account), `${listPath(regionId, options.account)}.cleared-${Date.now()}`)
       } catch {
         // nothing to clear
       }
@@ -111,7 +146,7 @@ export function writeOfficialList(regionId, models, options = {}) {
     const entries = ids.filter((id) => byId.get(id).rich).map((id) => byId.get(id).entry)
     mkdirSync(listDir(), { recursive: true })
     // Staged in the target directory so the rename cannot fail with EXDEV.
-    const staging = join(listDir(), `.official-${regionId}-${process.pid}.json`)
+    const staging = join(listDir(), `.official-${regionId}-${process.pid}-${Date.now()}.json`)
     writeFileSync(staging, JSON.stringify({
       version: LIST_VERSION,
       ...(typeof options.account === 'string' && options.account.length > 0 ? { account: options.account } : {}),
@@ -120,10 +155,43 @@ export function writeOfficialList(regionId, models, options = {}) {
       ids,
       entries
     }))
-    renameSync(staging, listPath(regionId))
+    renameSync(staging, listPath(regionId, options.account))
     return { saved: true, count: ids.length, withMeta: entries.length }
   } catch {
     return { saved: false, count: 0 }
+  }
+}
+
+/**
+ * Every account's imported list of one deployment, as one list.
+ *
+ * The picker offers models per deployment, and a request is routed to whichever account
+ * can answer, so the list has to be the union: a model that only the second account may
+ * call is still callable. Entries are merged field by field (the same rule the catalog
+ * cache uses), ids are de-duplicated, and nothing is invented — a list that only exists
+ * for one account simply contributes its own ids.
+ *
+ * @returns {{ ids: string[], entries: object[], importedAt: number, from: string } | undefined}
+ */
+export function mergedOfficialList(regionId, accounts) {
+  const names = Array.isArray(accounts) && accounts.length > 0 ? accounts : [undefined]
+  const lists = names.map((account) => readOfficialList(regionId, account)).filter((list) => list !== undefined)
+  if (lists.length === 0) return undefined
+  if (lists.length === 1) return lists[0]
+  const ids = []
+  const byId = new Map()
+  for (const list of lists) {
+    for (const id of list.ids) if (!ids.includes(id)) ids.push(id)
+    for (const entry of list.entries) {
+      const previous = byId.get(entry.id)
+      byId.set(entry.id, previous === undefined ? entry : { ...previous, ...entry })
+    }
+  }
+  return {
+    ids,
+    entries: [...byId.values()],
+    importedAt: lists.reduce((latest, list) => Math.max(latest, list.importedAt ?? 0), 0),
+    from: lists.map((list) => list.from).filter(Boolean).join(', ')
   }
 }
 

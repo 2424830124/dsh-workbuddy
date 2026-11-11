@@ -14,12 +14,13 @@ import { readFileSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
-import { accountIdOf, beginLogin, logoutRegion, pendingLogins, readMeta, readToken, refreshRegion, regionStatus } from '../account/auth.js'
+import { accountOf, beginLogin, cancelLogin, logoutRegion, pendingAccounts, pendingLoginFor, pendingLogins, prefsFor, readMeta, readToken, refreshRegion, regionStatus, slotKey, usableSlot } from '../account/auth.js'
+import { PRIMARY_ACCOUNT, accountSlots, listAccounts, newAccountId, slotFor } from '../account/pool.js'
 import { invalidateBusy, fetchBusyLevels } from '../catalog/busy.js'
-import { SWEEP_MIN_INTERVAL_MS, availabilitySummary, readAvailability, runSweep, sweepDue } from '../catalog/availability.js'
+import { SWEEP_MIN_INTERVAL_MS, aggregateAvailability, runSweep, sweepDue } from '../catalog/availability.js'
 import { claimDailyCheckin, fetchCheckinStatus, fetchCredits } from '../account/credits.js'
 import { localDayKey } from '../core/http.js'
-import { isEnabled, readPrefs, setEnabled } from '../catalog/model-prefs.js'
+import { isEnabled, setEnabled } from '../catalog/model-prefs.js'
 import { readOfficialList, writeOfficialList } from '../catalog/official-list.js'
 import { REGIONS, REGION_IDS, sitePageUrl } from '../core/regions.js'
 import { notifyModelTopology } from '../core/topology.js'
@@ -100,18 +101,57 @@ async function readJsonBody(req) {
  * check-in call, and doing them in sequence made every `/state` as slow as the sum of four
  * round trips (346 ms measured) — which the panel feels on every action, and a model switch
  * does not even need this payload.
+ *
+ * Within one deployment the accounts are read in parallel for the same reason, and the
+ * deployment-level fields are aggregated: `credits` is the sum over its accounts (that is
+ * what the row shows), `loggedIn` is true when at least one account can be called, and
+ * the first signed-in account still answers the top-level `nickname`/`expiresAt` the way a
+ * single-account panel expected. `accounts` carries the detail, in fallback order — and
+ * only the accounts that really exist, i.e. the ones holding credentials. The panel draws a
+ * row per entry, so an entry nobody can read a token for can only ever read 未知 / 未登录,
+ * cannot be called and cannot be signed out; a deployment with no account left answers with
+ * an empty list and the panel says so instead of drawing that row.
  */
 async function statePayload(ctx, adapters) {
   const regions = await Promise.all(REGION_IDS.map(async (id) => {
     const region = REGIONS[id]
-    const status = await regionStatus(ctx, region)
-    const meta = await readMeta(ctx, region)
-    const token = await readToken(ctx, region)
-    const signedIn = token.length > 0
+    const pendingFlow = pendingLoginFor(region)
+    const slots = accountSlots(region)
+    const accounts = (await Promise.all(slots.map(async (slot) => {
+      const [status, meta, token] = await Promise.all([regionStatus(ctx, slot), readMeta(ctx, slot), readToken(ctx, slot)])
+      const signedIn = token.length > 0
+      let credits = null
+      let checkin = null
+      if (signedIn) {
+        const [creditResult, checkinResult] = await Promise.all([
+          fetchCredits(ctx, slot).catch((error) => ({ supported: true, ok: false, reason: String(error?.message ?? error) })),
+          fetchCheckinStatus(ctx, slot).catch((error) => ({ supported: true, ok: false, reason: String(error?.message ?? error) }))
+        ])
+        credits = creditResult
+        checkin = checkinResult
+      }
+      return {
+        id: accountOf(slot),
+        nickname: typeof meta?.nickname === 'string' ? meta.nickname : '',
+        // `status.loggedIn` is the expiry-aware answer, which is what the row shows: a
+        // token that is still present but already past its expiry reads 已过期, exactly
+        // as it did when a deployment held a single account.
+        loggedIn: status.loggedIn,
+        hasToken: signedIn,
+        expiresAt: typeof meta?.expiresAt === 'number' ? meta.expiresAt : 0,
+        refreshable: typeof meta?.refreshToken === 'string' && meta.refreshToken.length > 0,
+        pending: pendingLogins.has(slotKey(slot)),
+        credits,
+        checkin,
+        lastClaim: typeof meta?.checkin === 'object' && meta.checkin !== null ? meta.checkin : null
+      }
+    }))).filter((entry) => entry.hasToken === true)
+
     let models = 0
     let modelsSource = null
     let modelsCachedAt = null
-    if (signedIn && adapters[id] !== undefined) {
+    const anyToken = accounts.some((entry) => entry.hasToken)
+    if (anyToken && adapters[id] !== undefined) {
       try {
         models = (await adapters[id].models()).length
         modelsSource = adapters[id].catalogSource ?? null
@@ -120,37 +160,59 @@ async function statePayload(ctx, adapters) {
         models = 0
       }
     }
-    let credits
-    let checkin
-    if (signedIn) {
-      const [creditResult, checkinResult] = await Promise.all([
-        fetchCredits(ctx, region).catch((error) => ({ supported: true, ok: false, reason: String(error?.message ?? error) })),
-        fetchCheckinStatus(ctx, region).catch((error) => ({ supported: true, ok: false, reason: String(error?.message ?? error) }))
-      ])
-      credits = creditResult
-      checkin = checkinResult
+
+    // The sums the rows show. A balance that could not be read is `null`, never 0 — the
+    // difference between "empty" and "unknown" is the whole point of the credit column.
+    let total = 0
+    let known = 0
+    let daily = 0
+    for (const entry of accounts) {
+      if (entry.credits?.ok !== true || typeof entry.credits.total !== 'number') continue
+      total += entry.credits.total
+      known += 1
+      if (typeof entry.credits.daily === 'number') daily += entry.credits.daily
     }
+    const credits = known === 0 ? null : { supported: true, ok: true, total: round2(total), daily: round2(daily), accounts: known }
+    const first = accounts.find((entry) => entry.loggedIn)
+    const checkin = accounts.find((entry) => entry.checkin !== null)?.checkin ?? null
+
     return {
       id,
       label: region.label,
       provider: region.provider,
       endpoint: region.endpoint,
-      loggedIn: status.loggedIn,
-      pending: pendingLogins.has(id),
-      nickname: typeof meta?.nickname === 'string' ? meta.nickname : '',
-      expiresAt: typeof meta?.expiresAt === 'number' ? meta.expiresAt : 0,
-      refreshable: typeof meta?.refreshToken === 'string' && meta.refreshToken.length > 0,
+      loggedIn: accounts.some((entry) => entry.loggedIn),
+      // Asked of the in-flight logins rather than of the listed accounts: the account being
+      // added does not exist yet, so a login started for it is keyed `cn:<new id>` and no
+      // entry in this payload would ever say `pending`. The panel polls while a deployment is
+      // pending, so answering "no" here is what left a freshly added account invisible until
+      // the user reloaded the page by hand.
+      pending: pendingAccounts(region),
+      // The pending flow belongs to the host: it minted the URL and it runs the poll that will
+      // finish it. Publishing both here is what lets the panel show the link again after a
+      // reload — it may only have kept it in memory, and then a 等待授权… with nothing to click
+      // and no way out was all it could draw.
+      loginUrl: pendingFlow?.url !== undefined && pendingFlow.url.length > 0 ? pendingFlow.url : null,
+      pendingSince: pendingFlow?.startedAt ?? null,
+      // Kept for consumers that still speak the single-account shape (the state service,
+      // the picker's own row): the first signed-in account answers for the deployment.
+      nickname: first?.nickname ?? accounts[0]?.nickname ?? '',
+      expiresAt: first?.expiresAt ?? accounts[0]?.expiresAt ?? 0,
+      refreshable: accounts.some((entry) => entry.refreshable),
       models,
       modelsSource,
       modelsCachedAt,
       hasBusy: region.hasBusy === true,
-      credits: credits ?? null,
-      checkin: checkin ?? null,
-      lastClaim: typeof meta?.checkin === 'object' && meta.checkin !== null ? meta.checkin : null
+      credits,
+      checkin,
+      lastClaim: first?.lastClaim ?? accounts[0]?.lastClaim ?? null,
+      accounts
     }
   }))
   return { regions }
 }
+
+const round2 = (value) => Math.round(value * 100) / 100
 
 /**
  * Register the panel's routes. Call inside `ctx.inject(['webServer'], …)` so a
@@ -253,10 +315,11 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
             notifyModelTopology(ctx)
           }
           const models = await adapter.models()
-          const account = await accountIdOf(ctx, region)
-          const ledger = readAvailability(region.id, account)
+          const slot = usableSlot(region)
+          const account = accountOf(slot)
+          const ledger = aggregateAvailability(region.id, listAccounts(region).map((entry) => entry.id))
           const imported = readOfficialList(region.id, account)
-          const prefs = readPrefs(region.id)
+          const prefs = prefsFor(region)
           sendJson(res, 200, {
             region: region.id,
             source: adapter.catalogSource ?? 'none',
@@ -283,6 +346,10 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
               promotion: entry.promotion,
               availability: ledger.models.get(entry.id) ?? null,
               enabled: isEnabled(prefs, entry.id),
+              // On by the user's choice, but the sweep has it out of the way until it
+              // answers again. The panel words the hint from this; the switch itself stays
+              // their answer, which is what makes the recovery put it back unchanged.
+              autoOff: prefs.autoOff.has(entry.id),
               // `on` means the user turned it on; everything else is the default, which is
               // off. The panel keeps the distinction to word the hint, not to change the state.
               decided: prefs.enabled.has(entry.id) ? 'on' : 'default'
@@ -322,7 +389,9 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
         const reset = body.reset === true
         const result = setEnabled(region.id, ids, enabled, { reset })
         const models = adapter === undefined ? [] : await adapter.models()
-        const prefs = readPrefs(region.id)
+        // Read back through `prefsFor`, so the count the caller is told is the same count
+        // the picker will offer — including any model the sweep has suspended.
+        const prefs = prefsFor(region)
         // The picker caches its catalog until it hears this, so without the
         // notification a model switched off here stays selectable there.
         notifyModelTopology(ctx)
@@ -384,28 +453,45 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
             const manual = url.searchParams.get('manual') === '1'
             const entries = await adapter.models()
             const ids = entries.map((entry) => entry.id)
-            const sweep = ids.length === 0
-              ? { skipped: false, results: [] }
-              : await runSweep(ctx, region, ids, {
+            // Every account is probed, because the list answers "can this deployment call
+            // the model" and one account may be allowed what another is denied. Probing only
+            // the primary would leave a model the second account can call showing as
+            // unusable, which is the same wrong answer the aggregate exists to prevent.
+            const results = []
+            for (const slot of accountSlots(region)) {
+              if (ids.length === 0) break
+              const sweep = await runSweep(ctx, slot, ids, {
                 manual,
                 minIntervalMs: region.autoProbeIntervalMs ?? SWEEP_MIN_INTERVAL_MS
               })
-            if (sweep.skipped !== true) {
-              ctx.logger.info(`[workbuddy] ${region.id}: ${manual ? '手动' : '自动'}可用性检测 ${sweep.results.length} 个${region.freeProbe === true ? '（零消耗）' : '（每个模型一个 token）'} — ${sweep.results.map((result) => `${result.id}=${result.state}`).join(' ')}`)
+              if (sweep.skipped === true) continue
+              results.push(...sweep.results)
               for (const result of sweep.results) {
                 if (result.state === 'dead' || result.state === 'denied') {
-                  ctx.logger.warn(`[workbuddy] ${region.id}: ${result.id} 判定为不可用（${result.detail}）`)
+                  ctx.logger.warn(`[workbuddy] ${slotKey(slot)}: ${result.id} 判定为不可用（${result.detail}）`)
                 }
               }
+            }
+            if (ids.length > 0 && results.length === 0) {
+              ctx.logger.info(`[workbuddy] ${region.id}: ${manual ? '手动' : '自动'}可用性检测已跳过（未到间隔）`)
+            } else if (results.length > 0) {
+              ctx.logger.info(`[workbuddy] ${region.id}: ${manual ? '手动' : '自动'}可用性检测 ${results.length} 个${region.freeProbe === true ? '（零消耗）' : '（每个模型一个 token）'} — ${results.map((result) => `${result.id}=${result.state}`).join(' ')}`)
               adapter.invalidateCatalog()
               await adapter.models()
             }
           }
+          // The counts are the aggregate the panel's chips show: one account's `denied`
+          // must not be reported as the deployment's verdict when a sibling can call the
+          // model. `sweepDue` is asked of the first account, because that is the one the
+          // automatic sweep runs for first and therefore the one whose timestamp decides.
+          const accountIds = listAccounts(region).map((entry) => entry.id)
+          const summary = aggregateAvailability(region.id, accountIds)
           sendJson(res, 200, {
             region: region.id,
             manual: url.searchParams.get('manual') === '1',
-            ...availabilitySummary(region.id),
-            ...sweepDue(region.id, region.autoProbeIntervalMs ?? SWEEP_MIN_INTERVAL_MS)
+            ...summary,
+            models: [...summary.models.entries()].map(([id, entry]) => ({ id, ...entry })),
+            ...sweepDue(region.id, region.autoProbeIntervalMs ?? SWEEP_MIN_INTERVAL_MS, Date.now(), accountIds[0])
           })
         } catch (error) {
           sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) })
@@ -436,8 +522,12 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
       }
 
       /**
-       * One deployment's credit balance on its own, so the panel can refresh a
-       * single row instead of re-reading the whole state payload.
+       * One account's (or one deployment's) credit balance on its own, so the panel can
+       * refresh a single row instead of re-reading the whole state payload.
+       *
+       * `account` names the account to read; without it the deployment's current account
+       * answers, and the result carries that account's id so a caller can tell which one
+       * the number came from.
        */
       if (path === `${API_PREFIX}/credits`) {
         const id = String(url.searchParams.get('region') ?? '').toLowerCase()
@@ -446,8 +536,10 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
           sendJson(res, 400, { error: `unknown region: ${id}` })
           return
         }
+        const named = url.searchParams.get('account')
+        const slot = named === null ? usableSlot(region) : slotFor(region, named)
         try {
-          sendJson(res, 200, { region: region.id, credits: await fetchCredits(ctx, region) })
+          sendJson(res, 200, { region: region.id, account: accountOf(slot), credits: await fetchCredits(ctx, slot) })
         } catch (error) {
           sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) })
         }
@@ -477,7 +569,7 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
         }
         const adapter = adapters[region.id]
         if (method === 'GET') {
-          const list = readOfficialList(region.id, await accountIdOf(ctx, region))
+          const list = readOfficialList(region.id, accountOf(usableSlot(region)))
           sendJson(res, 200, {
             region: region.id,
             ids: list?.ids ?? [],
@@ -497,7 +589,13 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
             return
           }
           const source = typeof body.from === 'string' && body.from.length > 0 ? body.from : 'web-session'
-          const result = writeOfficialList(region.id, body.models, { from: source, account: await accountIdOf(ctx, region) })
+          // The capture is one account's entitlement, and the file is per account now, so
+          // the account has to be named. Without one it lands on the account the
+          // deployment is currently using — the same account the panel would show.
+          const target = typeof body.account === 'string' && body.account.length > 0
+            ? slotFor(region, body.account)
+            : usableSlot(region)
+          const result = writeOfficialList(region.id, body.models, { from: source, account: accountOf(target) })
           adapter?.invalidateCatalog()
           const models = adapter === undefined ? [] : await adapter.models()
           notifyModelTopology(ctx)
@@ -528,19 +626,48 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
           sendJson(res, 400, { error: 'unknown region' })
           return
         }
-        const outcome = await claimDailyCheckin(ctx, region)
-        const meta = await readMeta(ctx, region)
+        const slot = slotFor(region, body.account === undefined ? accountOf(usableSlot(region)) : String(body.account))
+        const outcome = await claimDailyCheckin(ctx, slot)
+        const meta = await readMeta(ctx, slot)
         if (meta !== undefined) {
-          setCredential(region.metaRef, JSON.stringify({
+          setCredential(slot.metaRef, JSON.stringify({
             ...meta,
             checkin: { day: localDayKey(), at: Date.now(), reason: '手动', ...outcome }
           }))
         }
-        sendJson(res, 200, { region: region.id, ...outcome, ...(await statePayload(ctx, adapters)) })
+        sendJson(res, 200, { region: region.id, account: accountOf(slot), ...outcome, ...(await statePayload(ctx, adapters)) })
         return
       }
 
-      if ((path === `${API_PREFIX}/login` || path === `${API_PREFIX}/logout` || path === `${API_PREFIX}/refresh`) && method === 'POST') {
+      /**
+       * Remove one account from a deployment.
+       *
+       * A dedicated route rather than a flag on `/logout`, because removing is the
+       * destructive direction: `/logout` signs the primary account out and that is what a
+       * single-account install has always meant, while this one deletes a named account and
+       * leaves its siblings alone.
+       */
+      if (path === `${API_PREFIX}/accounts/remove` && method === 'POST') {
+        const body = await readJsonBody(req)
+        const region = REGIONS[String(body?.region ?? '')]
+        if (region === undefined) {
+          sendJson(res, 400, { error: 'unknown region' })
+          return
+        }
+        const account = String(body.account ?? '')
+        if (account.length === 0) {
+          sendJson(res, 400, { error: 'expected {"account":"…"}' })
+          return
+        }
+        const slot = slotFor(region, account)
+        await logoutRegion(ctx, slot)
+        adapters[region.id]?.invalidateCatalog()
+        notifyModelTopology(ctx)
+        sendJson(res, 200, await statePayload(ctx, adapters))
+        return
+      }
+
+      if ((path === `${API_PREFIX}/login` || path === `${API_PREFIX}/login/cancel` || path === `${API_PREFIX}/logout` || path === `${API_PREFIX}/refresh`) && method === 'POST') {
         const body = await readJsonBody(req)
         if (body === undefined) {
           sendJson(res, 400, { error: 'invalid JSON body' })
@@ -551,10 +678,33 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
           sendJson(res, 400, { error: 'unknown region' })
           return
         }
+        /**
+         * Which account the action is about.
+         *
+         * `add: true` is 添加账号: a brand-new account is appended to the pool, so it lands
+         * last in the fallback order and does not silently take over requests the existing
+         * accounts were serving. Everything else names an account, or leaves it out to mean
+         * "whichever account this deployment is currently using".
+         */
+        const slot = body.add === true
+          ? slotFor(region, newAccountId(Date.now()))
+          : slotFor(region, body.account === undefined ? accountOf(usableSlot(region)) : String(body.account))
+        if (path.endsWith('/login/cancel')) {
+          // Abandoning a flow the user no longer wants (or clicked 添加账号 twice for). The
+          // panel offers it from the callout, which used to be a dead end: a login that was
+          // never finished stayed on screen until the 5-minute poll timed out.
+          const result = cancelLogin(region, body.account === undefined ? undefined : String(body.account))
+          ctx.logger.info(`[workbuddy] ${region.id}: 已取消 ${result.cancelled} 个进行中的登录`)
+          sendJson(res, 200, { region: region.id, ...result, ...(await statePayload(ctx, adapters)) })
+          return
+        }
         if (path.endsWith('/login')) {
           try {
-            const result = await beginLogin(ctx, region, {
-              onSuccess: () => {
+            const result = await beginLogin(ctx, slot, {
+              // `add` means "this is a new account", so the poll must not fold the result
+              // into the slot it was given: the id is decided when the token arrives.
+              fresh: body.add === true,
+              onSuccess: (stored) => {
                 // Runs once the poll has the token, which is after this request has already
                 // answered. The picker's catalog is cached until it hears the topology event,
                 // so without this the newly reachable models stay invisible until something
@@ -562,22 +712,41 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
                 // and its models arriving, but the notification only appearing at logout.
                 adapters[region.id]?.invalidateCatalog()
                 notifyModelTopology(ctx)
+                // The account that was written, which for 添加账号 is decided by the poll and
+                // is therefore not known here. Both of these are per account: probing the
+                // deployment would leave the new account without verdicts, and claiming for
+                // the wrong one would take credits the new account is owed.
+                const written = slotFor(region, stored.account)
+                const live = adapters[region.id]
+                void (async () => {
+                  try {
+                    const entries = await live?.models()
+                    if (live !== undefined && (entries?.length ?? 0) > 0) {
+                      await runSweep(ctx, written, entries.map((entry) => entry.id), { manual: true })
+                      live.invalidateCatalog()
+                      notifyModelTopology(ctx)
+                    }
+                  } catch { /* a failed probe must not break the login it followed */ }
+                })()
+                void claimDailyCheckin(ctx, written).then((outcome) => {
+                  if (outcome.claimed) ctx.logger.info(`[workbuddy] ${slotKey(written)}: 登录后签到成功，获得 ${outcome.credit ?? 0} 积分`)
+                }).catch(() => {})
               }
             })
-            sendJson(res, 200, { region: region.id, url: result.url, pending: result.pending })
+            sendJson(res, 200, { region: region.id, account: accountOf(slot), add: body.add === true, url: result.url, pending: result.pending })
           } catch (error) {
             sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) })
           }
           return
         }
         if (path.endsWith('/logout')) {
-          await logoutRegion(ctx, region)
+          await logoutRegion(ctx, slot)
           adapters[region.id]?.invalidateCatalog()
           notifyModelTopology(ctx)
           sendJson(res, 200, await statePayload(ctx, adapters))
           return
         }
-        const result = await refreshRegion(ctx, region, { force: true })
+        const result = await refreshRegion(ctx, slot, { force: true })
         // A renewed credential can make a previously rejected catalog readable, and the
         // picker only re-reads when it hears this.
         if (result.refreshed === true) notifyModelTopology(ctx)

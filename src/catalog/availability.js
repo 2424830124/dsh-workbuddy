@@ -32,9 +32,11 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { accountIdOf, freshToken } from '../account/auth.js'
+import { accountOf, accountUidOf, freshToken, usableSlot } from '../account/auth.js'
+import { PRIMARY_ACCOUNT, listAccounts } from '../account/pool.js'
 import { chatRoutes } from '../core/regions.js'
 import { ensurePluginDir } from '../core/paths.js'
+import { readPrefs, setAutoOff } from './model-prefs.js'
 
 const LEDGER_VERSION = 1
 /** How long a probe verdict is trusted before the model is swept again. */
@@ -49,8 +51,20 @@ function ledgerDir() {
   return ensurePluginDir()
 }
 
-function ledgerPath(regionId) {
-  return join(ledgerDir(), `availability-${regionId}.json`)
+/**
+ * Ledgers, one file per (deployment, account): a pool of accounts each has its own.
+ *
+ * The key is the *pool* account id — the same string the panel and the adapter use — not
+ * the upstream uid. Keying by uid here and by pool id there is what made every verdict
+ * invisible: the sweeps wrote files nobody read, so every dot stayed grey.
+ *
+ * The primary account deliberately keeps the un-suffixed file name, which is what every
+ * install wrote before accounts could be added.
+ */
+function ledgerPath(regionId, account) {
+  const id = typeof account === 'string' ? account : ''
+  const suffix = id.length === 0 || id === PRIMARY_ACCOUNT ? '' : `-${id.replace(/[^A-Za-z0-9_-]/g, '')}`
+  return join(ledgerDir(), `availability-${regionId}${suffix}.json`)
 }
 
 /**
@@ -176,7 +190,7 @@ export function probeBody(region, id) {
  */
 export async function probeModel(ctx, region, id, options = {}) {
   const started = Date.now()
-  const token = options.token ?? await freshToken(ctx, region)
+  const token = options.token ?? await freshToken(ctx, usableSlot(region))
   const [route] = chatRoutes(region)
   const record = (state, detail) => ({ id, state, detail, at: Date.now(), ms: Date.now() - started })
   if (token.length === 0) return record('auth', '未登录')
@@ -242,14 +256,15 @@ export async function runSweep(ctx, region, ids, options = {}) {
   const interval = options.minIntervalMs ?? SWEEP_MIN_INTERVAL_MS
   // Verdicts describe one account's entitlements, so the sweep is scoped to whoever is
   // logged in now: a new account starts from an empty ledger and gets its own probes.
-  const account = await accountIdOf(ctx, region)
+  const account = accountOf(usableSlot(region))
+  const uid = await accountUidOf(ctx, usableSlot(region))
   if (options.manual !== true) {
     const due = sweepDue(region.id, interval, Date.now(), account)
     if (due.due !== true) return { skipped: true, reason: 'interval', lastSweepAt: due.lastSweepAt, results: [] }
   }
   // One fresh token for the whole sweep: the probes are metadata-only calls, so a token
   // minted two minutes ago is guaranteed to be good for all of them.
-  const token = await freshToken(ctx, region)
+  const token = await freshToken(ctx, usableSlot(region))
   const results = []
   let cursor = 0
   const concurrency = Math.max(1, options.concurrency ?? PROBE_CONCURRENCY)
@@ -263,67 +278,72 @@ export async function runSweep(ctx, region, ids, options = {}) {
     }
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, ids.length) }, () => worker()))
-  if (results.length > 0) writeAvailability(region.id, results, account)
-  markSwept(region.id, account)
-  return { skipped: false, results, account }
+  if (results.length > 0) writeAvailability(region.id, results, account, uid)
+  markSwept(region.id, account, uid)
+  // The sweep is the only thing that learns verdicts in bulk, so it is also where the
+  // offered set follows them — the panel and the picker then read one consistent answer.
+  const autoOff = syncAutoOff(region.id, listAccounts(region).map((entry) => entry.id))
+  return { skipped: false, results, account, autoOff }
 }
 
 /** @returns {{ savedAt: number, lastSweepAt: number, models: Map<string, {state: string, detail: string, at: number}> }} */
 /** Read the ledger as stored (no account filtering). */
-function readLedger(regionId) {
+function readLedger(regionId, account) {
   try {
-    const parsed = JSON.parse(readFileSync(ledgerPath(regionId), 'utf8'))
+    const parsed = JSON.parse(readFileSync(ledgerPath(regionId, account), 'utf8'))
     if (parsed?.version !== LEDGER_VERSION || typeof parsed.models !== 'object' || parsed.models === null) {
       return { account: undefined, savedAt: 0, lastSweepAt: 0, models: new Map() }
     }
     return {
       account: typeof parsed.account === 'string' && parsed.account.length > 0 ? parsed.account : undefined,
+      uid: typeof parsed.uid === 'string' && parsed.uid.length > 0 ? parsed.uid : undefined,
       savedAt: typeof parsed.savedAt === 'number' ? parsed.savedAt : 0,
       lastSweepAt: typeof parsed.lastSweepAt === 'number' ? parsed.lastSweepAt : 0,
       models: new Map(Object.entries(parsed.models))
     }
   } catch {
-    return { account: undefined, savedAt: 0, lastSweepAt: 0, models: new Map() }
+    return { account: undefined, uid: undefined, savedAt: 0, lastSweepAt: 0, models: new Map() }
   }
 }
 
 /**
  * @param regionId deployment id
- * @param account when given, a ledger recorded for another account reads as empty
+ * @param account which account's ledger to read; it is its own file
  * @returns {{ savedAt: number, lastSweepAt: number, models: Map<string, {state: string, detail: string, at: number}> }}
  */
 export function readAvailability(regionId, account) {
-  const ledger = readLedger(regionId)
-  if (account !== undefined && ledger.account !== undefined && ledger.account !== account) {
-    return { savedAt: 0, lastSweepAt: 0, models: new Map() }
-  }
+  const ledger = readLedger(regionId, account)
   return { savedAt: ledger.savedAt, lastSweepAt: ledger.lastSweepAt, models: ledger.models }
 }
 
-function store(regionId, ledger, now) {
+function store(regionId, ledger, now, account) {
   mkdirSync(ledgerDir(), { recursive: true })
-  writeFileSync(ledgerPath(regionId), JSON.stringify({
+  writeFileSync(ledgerPath(regionId, account), JSON.stringify({
     version: LEDGER_VERSION,
     ...(ledger.account === undefined ? {} : { account: ledger.account }),
+    // The upstream uid, when the account has one. Informational: it makes a file on disk
+    // traceable to a person, and it is deliberately *not* the key — see `ledgerPath`.
+    ...(ledger.uid === undefined ? {} : { uid: ledger.uid }),
     savedAt: now,
     lastSweepAt: ledger.lastSweepAt,
     models: Object.fromEntries(ledger.models)
   }))
 }
 
-/** Merge verdicts by id (a fresh verdict always wins) and store them. */
-export function writeAvailability(regionId, results, account) {
+/**
+ * Merge verdicts by id (a fresh verdict always wins) and store them.
+ *
+ * One file per account now, so a second signed-in account neither inherits the first
+ * one's `denied` marks nor erases them: the two verdict sets never share a document.
+ * The `account` field stays inside the file because the file name only carries a
+ * sanitised form of it.
+ */
+export function writeAvailability(regionId, results, account, uid) {
   try {
-    const ledger = readLedger(regionId)
+    const ledger = readLedger(regionId, account)
     const now = Date.now()
-    // A verdict describes one account's entitlements. Writing a different account's
-    // results into the same ledger is what made a new login inherit the previous
-    // account's `denied` marks for twelve hours, so a different account starts clean.
-    if (account !== undefined && ledger.account !== account) {
-      ledger.account = account
-      ledger.models = new Map()
-      ledger.lastSweepAt = 0
-    }
+    if (account !== undefined) ledger.account = account
+    if (uid !== undefined) ledger.uid = uid
     for (const result of results) {
       if (typeof result?.id !== 'string' || result.id.length === 0) continue
       ledger.models.set(result.id, {
@@ -333,7 +353,7 @@ export function writeAvailability(regionId, results, account) {
         ...(typeof result.ms === 'number' ? { ms: result.ms } : {})
       })
     }
-    store(regionId, ledger, now)
+    store(regionId, ledger, now, account)
     return true
   } catch {
     return false
@@ -341,12 +361,12 @@ export function writeAvailability(regionId, results, account) {
 }
 
 /** Record that a full sweep just ran, which is what the daily limit reads. */
-function markSwept(regionId, account) {
+function markSwept(regionId, account, uid) {
   try {
-    const ledger = readLedger(regionId)
-    if (account !== undefined && ledger.account !== undefined && ledger.account !== account) return false
+    const ledger = readLedger(regionId, account)
+    if (uid !== undefined) ledger.uid = uid
     ledger.lastSweepAt = Date.now()
-    store(regionId, ledger, Date.now())
+    store(regionId, ledger, Date.now(), account)
     return true
   } catch {
     return false
@@ -392,4 +412,79 @@ export function availabilitySummary(regionId, account) {
     counts: Object.fromEntries(counts),
     models: [...ledger.models.entries()].map(([id, entry]) => ({ id, ...entry }))
   }
+}
+
+/**
+ * What the panel shows for a deployment that may hold several accounts.
+ *
+ * A model is listed as usable when *any* account can call it, which is the question a
+ * person looking at the list is asking. The worst verdict wins only when every account
+ * refused, and a verdict from one account never hides a model another can use — with two
+ * accounts, "one is out of credits" says nothing about whether the model is callable.
+ *
+ * Reads at most one ledger per account, and an account with no verdict at all counts as
+ * "no opinion" rather than as a refusal.
+ */
+export function aggregateAvailability(regionId, accounts) {
+  const ids = Array.isArray(accounts) && accounts.length > 0 ? accounts : [undefined]
+  const perAccount = ids.map((account) => readAvailability(regionId, account))
+  const merged = new Map()
+  for (const ledger of perAccount) {
+    for (const [id, entry] of ledger.models) {
+      const previous = merged.get(id)
+      const state = String(entry?.state ?? 'error')
+      if (previous === undefined) {
+        merged.set(id, { ...entry, state, accounts: [state] })
+        continue
+      }
+      previous.accounts.push(state)
+      // A usable verdict from one account wins outright.
+      if (previous.state !== 'ok' && state === 'ok') {
+        merged.set(id, { ...entry, state: 'ok', accounts: previous.accounts })
+      } else if (isFatal(previous.state) && !isFatal(state)) {
+        // An undecided state says less than "no permission": keep the more specific one.
+        merged.set(id, { ...entry, state, accounts: previous.accounts })
+      }
+    }
+  }
+  const counts = new Map()
+  for (const entry of merged.values()) counts.set(entry.state, (counts.get(entry.state) ?? 0) + 1)
+  return {
+    savedAt: perAccount.reduce((latest, ledger) => Math.max(latest, ledger.savedAt ?? 0), 0),
+    total: merged.size,
+    counts: Object.fromEntries(counts),
+    models: merged,
+    multiple: ids.length > 1
+  }
+}
+
+/** Verdicts that would hide a model from every account. */
+const FATAL_STATES = new Set(['dead', 'denied', 'blocked'])
+const isFatal = (state) => FATAL_STATES.has(state)
+
+/**
+ * Make the offered set follow the verdicts.
+ *
+ * A model that stops answering should leave the picker, but the user's switch is not the
+ * place to record that: deleting it would lose the choice, and the model would come back as
+ * "off" the day it is usable again. So a suspension is written *next to* the choice
+ * (`autoOff`), and lifting it puts the switch back exactly where it was.
+ *
+ * The decision comes from the aggregate verdict, not from one ledger: an account of the pool
+ * saying `denied` must not suspend a model a sibling can still call, and the same rule keeps
+ * a suspension from being lifted by an account that merely has not been probed yet.
+ */
+export function syncAutoOff(regionId, accountIds, now = Date.now()) {
+  const merged = aggregateAvailability(regionId, accountIds).models
+  const unusable = new Set()
+  for (const [id, entry] of merged) {
+    if (!UNUSABLE_STATES.has(entry?.state)) continue
+    if (typeof entry.at !== 'number' || now - entry.at > AVAILABILITY_TTL_MS) continue
+    unusable.add(id)
+  }
+  const prefs = readPrefs(regionId)
+  return setAutoOff(regionId, {
+    suspend: [...prefs.enabled].filter((id) => unusable.has(id)),
+    resume: [...prefs.autoOff].filter((id) => !unusable.has(id))
+  })
 }

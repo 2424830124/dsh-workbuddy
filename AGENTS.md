@@ -146,13 +146,14 @@ src/
     regions.js      部署定义（端点、探测形态、聊天路由、是否支持繁忙度）
     topology.js     通知 harness「可选模型变了」
   account/
-    auth.js         登录/续期协议、凭据读写、账号状态
+    pool.js         账号池：一个部署一份 accounts-<部署>.json，第 1 个账号零迁移
+    auth.js         登录/续期协议、按账号的凭据读写、账号状态
     credits.js      积分、签到、启动/午夜自动领取
   catalog/
     catalog.js      实时目录（scoped + /v3/config 并行合并）+ 准入策略
     catalog-cache.js 目录落盘缓存（追加、缺字段不覆盖、倍率不落盘）
-    availability.js 可用性台账（最小请求探测、分类、12 小时有效期）
-    model-prefs.js  每个模型的启停（只落盘"启用了哪些"，默认全停；退出不删）
+    availability.js 可用性台账（最小请求探测、分类、12 小时有效期；按账号记、按部署合并）
+    model-prefs.js  每个模型的启停（只落盘"启用了哪些"，默认全停；退出不删；自动停用另记）
     official-list.js 账号名单导入（id 或记录，字段级富化，不含倍率）
     busy.js         /v2/chat/busy 的繁忙程度（仅大陆版）
   llm/
@@ -164,7 +165,7 @@ src/
   panel/
     api.js          面板用的宿主路由 /workbuddy/*
 client/index.js     设置面板（`settings.section` 槽位的客户端半边；同时 provide 状态服务）
-test/unit/          离线单测（`npm test`，15 个）
+test/unit/          离线单测（`npm test`，16 个）
 test/live/          需要真实账号的在线探针与诊断脚本
 ```
 
@@ -215,6 +216,20 @@ test/live/          需要真实账号的在线探针与诊断脚本
    账号明天还会回来，重新点四十个开关不是功能。
    想改回"按判定给默认"，先回答一个问题：限流模型该默认开还是默认关？两种都会有人不满意，
    而现在至少不会替用户做决定。
+8.2 **不可用的模型自动停用，恢复后自动还原。** 用户的原话："不可用的时候自动移到不可用分组，
+   并自动停用，当检测可用的时候会恢复原来的启停情况"。所以停用**不是**替他做决定，判定也
+   **不是** `isEnabled()` 的参数：`enabled-<region>.json` 里多一个 `autoOff` 数组，只装
+   "用户本来开着、但探测说它不可用"的 id —— 用户的选择留在 `enabled` 里，暂停记在旁边。
+   三条后果都要保住：
+   - **只暂停用户真开过的模型**（`setAutoOff` 里 `enabled.has(id)` 的前提）。给没人开过的模型
+     记一笔暂停，等于将来判定清了把它打开 —— 又变回"按判定给默认"。
+   - **恢复是自动的**：判定不再是 `dead`/`denied`（或过期）时 `syncAutoOff` 把它从 `autoOff`
+     里删掉，开关回到原处，不需要用户重新点。
+   - **手动拨开关会清掉暂停**（`setEnabled` 里 `autoOff.delete`）：拨开关是表态，留着暂停会把
+     用户刚打开的模型又吞掉。
+   判定取**聚合**结果（`aggregateAvailability`）：一个账号说"无权限"不能停掉兄弟账号还能用的模型。
+   写入点在 `runSweep` 尾部与 `adapter.recordVerdict()`（真实调用里学到的判定），两处都要
+   `syncAutoOff` + `notifyModelTopology`，否则选择器还在用旧列表。
 9. **流必须以 `data: [DONE]` 收尾。** 没有 `[DONE]`、也没有 `finish_reason` 就断流，是连接被
    掐断，必须上报 `TRANSPORT` 错误（让重试策略接管），**绝不能映射成 `stop`** —— 否则用户看到
    的是"话说一半就停了，还不重试"，而且日志里什么都没有。同理，**参数被截断的工具调用不要
@@ -254,6 +269,32 @@ test/live/          需要真实账号的在线探针与诊断脚本
     harness 自己会续跑该步骤（不变量 9）。续写是一轮新的请求：把已产出的正文/思考当作
     "incomplete draft" 附上，要求它给最终答案、**不许调工具**；块索引按 `maxIndex + 1` 偏移，
     否则会和前一轮的块撞号。`usage` 要累加后只发一次，`finish` 只发最后一次。
+15. **一个部署只有一个 provider，多账号是适配器内部的池。** harness 用 provider 字符串做适配器的
+    键、`providerInfo(provider).id` 必须原样回显、模型选择器也按 provider 分组，所以"再加一个
+    账号"**不能**变成"再加一个 provider"：池在适配器内部，而每个适配器只拿得到自己的 `region` ——
+    大陆版的请求回退不到海外版的账号，是**结构上拿不到**，不是靠判断。于是：
+    - 账号存在 `accounts-<部署>.json`。第 1 个是 `PRIMARY_ACCOUNT = 'primary'`，直接用该部署原本的
+      `tokenRef`/`metaRef`（零迁移，降级回旧版本也还认得出凭据）；后加的用 `` `${tokenRef}#${id}` ``。
+      `refsFor`/`slotFor`/`listAccounts` 等一律先过 `baseRegion()` —— 传进去的可能是"槽"（带账号后缀的
+      region），再往后缀一次就成了 `ref#id#id`。
+    - **一切按"账号池 id"记账，不按上游 uid**：可用性台账、导入名单、自动停用都如此。写入侧用 uid、
+      读取侧用池 id，就是曾经让所有圆点变灰的那个 bug（`client.mjs` 之外没有第二层能拦住它）。
+      uid 只当元数据（`accountUidOf`），用来把同一个人的多个 id 收敛成一个。
+    - **没有凭据的池条目不算账号**：`listAccounts` 只收 `loggedIn` 的，`registerAccount` 写入时顺手把
+      token 已不在的条目从池文件里删掉；旧版本写下的 ref（`<时间>#<uid>`）要能原样认出来，并且同一个
+      uid 只保留"手里有令牌那个"（`best()` 先看有没有令牌）。否则面板上就多一行 未知 / 未登录，
+      既打不出去、也退不掉。
+    - 路由只在"换个号能救"的错误上换账号：`QUOTA` / `RATE_WINDOW_EXCEEDED` / `RATE_LIMIT` / `AUTH`。
+      别的（例如 `11102` 下架、5xx）立刻抛 —— 换账号救不了，只是多花一次请求。顺序严格照面板顺序，
+      上一轮的赢家也不许插队（`lastGoodAccount` 只用于显示）。同一账号内部的补救（换会话标识重发、
+      401 续期后重发）不占回退名额。
+    - 每**轮**都重新路由（`sendAcrossAccounts` 在 `streamRound` 里），不是一次会话只路由一次。
+    - 一边已经在等授权时，「添加账号」返回那次进行中的登录，不另开一个（否则用户点几下就攒下几个
+      永远不完成的流程）。`/state` 发布 `loginUrl`/`pendingSince`（链接只在面板内存里的话，重开面板
+      就只剩一句"等待授权"）；取消走 `POST /workbuddy/login/cancel` → `cancelLogin()`，它**先 bump 该
+      槽的 generation 再删 pending** —— 睡着的轮询会把已取消的登录写回来，抹掉 generation 就是造出一个
+      用户没完成的账号。
+    - 面板路由的 dispatch 是**把整条路径拿来比相等**的，新增路由要同时加进那个判断，否则落到 404。
 
 ## 开发流程
 
@@ -261,11 +302,16 @@ test/live/          需要真实账号的在线探针与诊断脚本
   改动不一定生效——曾经因此让插件注册失败、面板全面 404，而重载也"修不回来"。
   `client/**` 的改动会热重载。判断办法：日志里有没有**新的** `已注册 provider …（实例 xxxx）`。
 - 不重启也能确认文件本身没问题：`node test/live/boot-path-check.mjs`（独立进程里真实跑 `apply()`）。
+- **每个单测开工第一件事：把 `DSH_HOME` 指到一个临时目录**（`process.env.DSH_HOME = join(tmpdir(), '…')`，
+  再 `rmSync` 清一遍）。凭据、缓存、台账、开关都在 `$DSH_HOME/dsh-workbuddy/` 下，而单测会往
+  `REGIONS.<id>.tokenRef` 里塞假 token —— 忘了这一步，在开发机上跑一次 `npm test` 就会把**你自己的
+  真 token 覆盖成 fixture**（`catalog.mjs` 就这么漏过一次，靠沙箱拦下才没出事）。`dshHome()` 每次调用
+  都读环境变量，所以在动态 import 之前赋值就够了。
 - 提交前跑 `npm test`。新增行为请补单测；面板相关的改动至少让 `test/unit/client.mjs` 的
   渲染断言覆盖到（它用一个小号 React **真的渲染**面板，缺 helper / 缺词典键会当场报错）。
 - 面板外观改动后跑 `node test/live/ui-preview.mjs` 并用截图对比（输出在 `%TEMP%`）。
 
-### 15 个离线单测各管什么
+### 16 个离线单测各管什么
 
 ```sh
 npm test                          # 全部
@@ -283,6 +329,7 @@ node test/unit/model-prefs.mjs    # 默认全停、只记启用集合、批量�
 node test/unit/availability.mjs   # 探测分类、dead 有效期、按 id 合并、分部署台账
 node test/unit/auth.mjs           # 退出删凭据、陈旧续期/登录结果不写回
 node test/unit/logout.mjs         # 退出隐藏全部模型、但启用集合保留，登录后照旧
+node test/unit/pool.mjs           # 账号池：零迁移的主账号、追加顺序、按账号凭据、回退规则、旧版 id 复原与去重
 node test/unit/adapter.mjs        # 提示词改写、请求体组装、聊天路由顺序、排队错误映射
 ```
 

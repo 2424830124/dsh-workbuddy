@@ -17,11 +17,12 @@ import { randomUUID } from 'node:crypto'
 
 import { WorkBuddyAdapter } from './llm/adapter.js'
 import { registerWorkbuddyApi } from './panel/api.js'
-import { REFRESH_BOOT_DELAY_MS, REFRESH_INTERVAL_MS, beginLogin, logoutRegion, refreshRegion, regionStatus } from './account/auth.js'
+import { REFRESH_BOOT_DELAY_MS, REFRESH_INTERVAL_MS, accountOf, beginLogin, logoutRegion, poolStatus, refreshRegion, slotKey } from './account/auth.js'
 import { runSweep, sweepDue } from './catalog/availability.js'
 import { claimDailyCheckin, runAutoClaim } from './account/credits.js'
 import { msUntilNextMidnight } from './core/http.js'
 import { readPrefs } from './catalog/model-prefs.js'
+import { accountSlots, slotFor } from './account/pool.js'
 import { REGIONS, REGION_IDS, regionList } from './core/regions.js'
 import { notifyModelTopology } from './core/topology.js'
 
@@ -38,7 +39,7 @@ async function executeCommand(ctx, adapters, invocation) {
 
   if (verb === '' || verb === 'status') {
     const lines = []
-    for (const region of REGION_IDS.map((id) => REGIONS[id])) lines.push((await regionStatus(ctx, region)).text)
+    for (const region of REGION_IDS.map((id) => REGIONS[id])) lines.push((await poolStatus(ctx, region)).text)
     lines.push('', '命令：/workbuddy login [intl|cn|all]、logout [intl|cn|all]、status、models [intl|cn]、check [intl|cn] [all]、refresh [intl|cn]')
     return { kind: 'success', text: lines.join('\n') }
   }
@@ -52,18 +53,22 @@ async function executeCommand(ctx, adapters, invocation) {
     const lines = []
     for (const region of regions) {
       try {
-        const result = await beginLogin(ctx, region, {
-          onSuccess: async () => {
+        const result = await beginLogin(ctx, slotFor(region), {
+          onSuccess: async (stored) => {
             adapters[region.id]?.invalidateCatalog()
             // Same as the panel route: the token arrives after this request has answered, and
             // the picker caches its catalog until it hears the topology event.
             notifyModelTopology(ctx)
+            // The account to sweep is the one the poll just wrote, not the one this command
+            // started with: `/workbuddy login` can add a second account, and probing the
+            // primary would leave the new one with no verdicts of its own.
+            const slot = slotFor(region, stored.account)
             // The availability ledger belongs to the account, so a new login starts with
             // no verdicts: probe this account once, which is how "which models can this
             // account use" gets answered (the catalog itself stays shared).
-            void probeAccount(region)
+            void probeAccount(slot)
             // A fresh account usually has today's check-in waiting.
-            void claimDailyCheckin(ctx, region).then(async (outcome) => {
+            void claimDailyCheckin(ctx, slot).then(async (outcome) => {
               if (outcome.claimed) ctx.logger.info(`[workbuddy] ${region.id}: 登录后签到成功，获得 ${outcome.credit ?? 0} 积分`)
             }).catch(() => {})
           }
@@ -81,7 +86,7 @@ async function executeCommand(ctx, adapters, invocation) {
   if (verb === 'logout') {
     const lines = []
     for (const region of regions) {
-      await logoutRegion(ctx, region)
+      for (const slot of accountSlots(region)) await logoutRegion(ctx, slot)
       adapters[region.id]?.invalidateCatalog()
       notifyModelTopology(ctx)
       lines.push(`${region.label}：凭据已清除`)
@@ -92,7 +97,8 @@ async function executeCommand(ctx, adapters, invocation) {
   if (verb === 'refresh') {
     const lines = []
     for (const region of regions) {
-      const result = await refreshRegion(ctx, region, { force: true })
+      const results = await Promise.all(accountSlots(region).map((slot) => refreshRegion(ctx, slot, { force: true })))
+      const result = { refreshed: results.some((entry) => entry.refreshed === true), reason: results.map((entry) => entry.reason).filter(Boolean).join('、') }
       // A renewed credential can unblock reads the old one was rejected for.
       if (result.refreshed === true) notifyModelTopology(ctx)
       lines.push(`${region.label}：${result.refreshed ? '已续期' : `未续期（${result.reason}）`}`)
@@ -143,14 +149,18 @@ async function executeCommand(ctx, adapters, invocation) {
         lines.push(`${region.label}：没有可检测的模型`)
         continue
       }
-      lines.push(`${region.label}：检测 ${targets.length} 个模型…`)
-      const sweep = await runSweep(ctx, region, targets.map((model) => model.id), { manual: true })
-      for (const result of sweep.results) {
-        lines.push(`  ${result.id} — ${result.state}${result.detail.length > 0 ? `（${result.detail}）` : ''}`)
+      // Every account of the deployment: a verdict is one account's entitlement, so a
+      // second account can be allowed exactly the models the first one is denied.
+      for (const slot of accountSlots(region)) {
+        lines.push(`${slotKey(slot)}：检测 ${targets.length} 个模型…`)
+        const sweep = await runSweep(ctx, slot, targets.map((model) => model.id), { manual: true })
+        for (const result of sweep.results) {
+          lines.push(`  ${result.id} — ${result.state}${result.detail.length > 0 ? `（${result.detail}）` : ''}`)
+        }
+        const counts = new Map()
+        for (const result of sweep.results) counts.set(result.state, (counts.get(result.state) ?? 0) + 1)
+        lines.push(`  结果：${[...counts.entries()].map(([state, count]) => `${state} ${count}`).join(' / ')}`)
       }
-      const counts = new Map()
-      for (const result of sweep.results) counts.set(result.state, (counts.get(result.state) ?? 0) + 1)
-      lines.push(`  结果：${[...counts.entries()].map(([state, count]) => `${state} ${count}`).join(' / ')}`)
     }
     return { kind: 'success', text: lines.join('\n') }
   }
@@ -192,10 +202,13 @@ export function apply(ctx) {
     ctx.logger.info(`[workbuddy] 启动定时器触发（实例 ${instance}）`)
     for (const id of REGION_IDS) {
       // Same reason as the sweep: a token can be retired while the app was closed, and the
-      // claim will still say it is good for weeks.
-      void refreshRegion(ctx, REGIONS[id], { rotate: true }).catch((error) => {
-        ctx.logger.warn(`[workbuddy] ${id}: 启动续期失败 — ${error instanceof Error ? error.message : String(error)}`)
-      })
+      // claim will still say it is good for weeks. Every account of the deployment rotates,
+      // because a request may be routed to any of them.
+      for (const slot of accountSlots(REGIONS[id])) {
+        void refreshRegion(ctx, slot, { rotate: true }).catch((error) => {
+          ctx.logger.warn(`[workbuddy] ${id}: 启动续期失败 — ${error instanceof Error ? error.message : String(error)}`)
+        })
+      }
     }
     // What the model picker will actually be offered, straight from the surface
     // the harness reads: the panel's catalog can be healthy while this list is
@@ -227,7 +240,9 @@ export function apply(ctx) {
   // claim is an upper bound the server does not honour (see REFRESH_INTERVAL_MS).
   const sweep = setInterval(() => {
     for (const id of REGION_IDS) {
-      void refreshRegion(ctx, REGIONS[id], { rotate: true }).catch(() => {})
+      for (const slot of accountSlots(REGIONS[id])) {
+        void refreshRegion(ctx, slot, { rotate: true }).catch(() => {})
+      }
     }
   }, REFRESH_INTERVAL_MS)
   sweep.unref?.()
@@ -254,22 +269,27 @@ export function apply(ctx) {
   // run every time the panel opens (its probe never generates), the
   // international one once a day (its probe costs a token per model).
   const AVAILABILITY_BOOT_DELAY_MS = 45_000
-  /** Probe every model once for the account that just logged in. */
-  const probeAccount = async (region) => {
-    const adapter = adapters[region.id]
+  /**
+   * Probe every model once for one account.
+   *
+   * The verdicts belong to the account, so it is probed per account rather than once per
+   * deployment: a second account may well be allowed models the first one is denied.
+   */
+  const probeAccount = async (slot) => {
+    const adapter = adapters[slot.id]
     if (adapter === undefined) return
     try {
       adapter.invalidateCatalog()
       const entries = await adapter.models()
       if (entries.length === 0) return
-      const result = await runSweep(ctx, region, entries.map((entry) => entry.id), { manual: true })
+      const result = await runSweep(ctx, slot, entries.map((entry) => entry.id), { manual: true })
       if (result.skipped === true) return
       const counts = new Map()
       for (const verdict of result.results) counts.set(verdict.state, (counts.get(verdict.state) ?? 0) + 1)
-      ctx.logger.info(`[workbuddy] ${region.id}: 登录后可用性检测完成 ${result.results.length} 个 — ${[...counts.entries()].map(([state, count]) => `${state} ${count}`).join(' / ')}`)
+      ctx.logger.info(`[workbuddy] ${slotKey(slot)}: 登录后可用性检测完成 ${result.results.length} 个 — ${[...counts.entries()].map(([state, count]) => `${state} ${count}`).join(' / ')}`)
       notifyModelTopology(ctx)
     } catch (error) {
-      ctx.logger.warn(`[workbuddy] ${region.id}: 登录后可用性检测失败 — ${error instanceof Error ? error.message : String(error)}`)
+      ctx.logger.warn(`[workbuddy] ${slotKey(slot)}: 登录后可用性检测失败 — ${error instanceof Error ? error.message : String(error)}`)
     }
   }
   const availabilityTimer = setTimeout(() => {
@@ -278,23 +298,30 @@ export function apply(ctx) {
       const adapter = adapters[id]
       if (adapter === undefined) continue
       const interval = region.autoProbeIntervalMs ?? 24 * 3600_000
-      if (sweepDue(id, interval).due !== true) continue
-      void (async () => {
-        adapter.invalidateCatalog()
-        const entries = await adapter.models()
-        if (sweepDue(id, interval).due !== true || entries.length === 0) return
-        const result = await runSweep(ctx, region, entries.map((entry) => entry.id), { minIntervalMs: interval })
-        if (result.skipped === true) return
-        const counts = new Map()
-        for (const verdict of result.results) counts.set(verdict.state, (counts.get(verdict.state) ?? 0) + 1)
-        ctx.logger.info(`[workbuddy] ${id}: 启动可用性检测完成 ${result.results.length} 个${region.freeProbe === true ? '（零消耗）' : '（每个模型一个 token）'} — ${[...counts.entries()].map(([state, count]) => `${state} ${count}`).join(' / ')}`)
-        adapter.invalidateCatalog()
-        // The verdicts change what the panel shows and what the snapshot reports, so the
-        // picker and the state service have to re-read.
-        notifyModelTopology(ctx)
-      })().catch((error) => {
-        ctx.logger.warn(`[workbuddy] ${id}: 启动可用性检测失败 — ${error instanceof Error ? error.message : String(error)}`)
-      })
+      // Per account: the throttle is stored per ledger, and a verdict is one account's
+      // entitlement — sweeping only the primary would leave a second account unevaluated.
+      for (const slot of accountSlots(region)) {
+        // Asked of this account's own ledger. Passing `undefined` here read the
+        // deployment-wide file, so once the primary account has been swept recently every
+        // additional account was skipped forever and never got a verdict of its own.
+        if (sweepDue(id, interval, Date.now(), accountOf(slot)).due !== true) continue
+        void (async () => {
+          adapter.invalidateCatalog()
+          const entries = await adapter.models()
+          if (entries.length === 0) return
+          const result = await runSweep(ctx, slot, entries.map((entry) => entry.id), { minIntervalMs: interval })
+          if (result.skipped === true) return
+          const counts = new Map()
+          for (const verdict of result.results) counts.set(verdict.state, (counts.get(verdict.state) ?? 0) + 1)
+          ctx.logger.info(`[workbuddy] ${slotKey(slot)}: 启动可用性检测完成 ${result.results.length} 个${region.freeProbe === true ? '（零消耗）' : '（每个模型一个 token）'} — ${[...counts.entries()].map(([state, count]) => `${state} ${count}`).join(' / ')}`)
+          adapter.invalidateCatalog()
+          // The verdicts change what the panel shows and what the snapshot reports, so the
+          // picker and the state service have to re-read.
+          notifyModelTopology(ctx)
+        })().catch((error) => {
+          ctx.logger.warn(`[workbuddy] ${slotKey(slot)}: 启动可用性检测失败 — ${error instanceof Error ? error.message : String(error)}`)
+        })
+      }
     }
   }, AVAILABILITY_BOOT_DELAY_MS)
   availabilityTimer.unref?.()

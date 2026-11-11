@@ -1,18 +1,19 @@
 /**
  * Where this plugin keeps everything it owns.
  *
- * One directory, `$DSH_HOME/dsh-workbuddy/`: credentials, the catalog cache, the
- * availability ledger, per-model switches and the imported account list. Keeping them
- * together means "reset the plugin" is one folder to delete, and nothing of ours hides
+ * One directory, `$DSH_HOME/dsh-workbuddy/`: credentials, the account pool, the catalog
+ * cache, the availability ledger, per-model switches and the imported account list. Keeping
+ * them together means "reset the plugin" is one folder to delete, and nothing of ours hides
  * inside the harness's own `cache/` tree.
  *
  * Credentials are written here rather than through the harness credentials service: that
  * service keeps a single document for every plugin, and this plugin's tokens have no
  * business sharing a file — or a ref namespace — with anything else.
  *
- * Only three things are exported because only three are used: the directory, the credential
- * reads, and the credential writes. Path helpers with no caller were deleted rather than
- * left as an unused API surface.
+ * The exported surface is the directory, the credential reads, the credential writes, and
+ * `credentialRefs()` — the ref list the account pool scans to notice credentials whose pool
+ * entry went missing. Path helpers with no caller were deleted rather than left as an unused
+ * API surface.
  */
 
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
@@ -80,6 +81,17 @@ function readAllCredentials() {
 export function readCredential(ref) {
   const value = readAllCredentials()[ref]
   return typeof value === 'string' ? value : ''
+}
+
+/**
+ * Every stored ref.
+ *
+ * The account pool uses this to notice credentials whose pool entry went missing (a
+ * failed write, an older build): a signed-in account must not become invisible just
+ * because the index lost it. Nothing here reveals a value.
+ */
+export function credentialRefs() {
+  return Object.keys(readAllCredentials())
 }
 
 /**

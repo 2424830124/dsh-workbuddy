@@ -258,11 +258,48 @@ assert.equal(topologyNotices.length, beforeRead, 'plain reads do not notify')
 // authorization flow (and its listener), which an offline unit test must not do.
 {
   const source = readFileSync(new URL('../../src/panel/api.js', import.meta.url), 'utf8')
-  const start = source.indexOf('onSuccess: () => {')
+  const start = source.indexOf('onSuccess: (')
   assert.ok(start > 0, 'the login route supplies an onSuccess callback')
   const body = source.slice(start, source.indexOf('})', start))
   assert.match(body, /invalidateCatalog\(\)/, 'the completed login invalidates the cached catalog')
   assert.match(body, /notifyModelTopology\(ctx\)/, 'and notifies the picker, which caches its list')
+  // 添加账号 decides the account id when the token arrives, so everything after the login
+  // has to key off the account that was written rather than the one the request named.
+  assert.match(body, /stored\.account/, 'the callback acts on the account that was actually written')
+  assert.match(body, /slotFor\(region, stored\.account\)/, 'and builds that account\'s slot from it')
+}
+
+// 添加账号 refreshes by itself: the region-level `pending` is answered from the in-flight
+// logins, so a login for an account that does not exist yet still makes the panel poll. Read
+// off the listed accounts it would always be false — which is why a freshly added account
+// stayed invisible until the user reloaded the page by hand.
+{
+  const { pendingLogins } = await import('../../src/account/auth.js')
+  pendingLogins.set('cn:acc-not-yet', { url: 'https://www.workbuddy.cn/login?state=st', startedAt: Date.now() })
+  try {
+    const during = await call('GET', '/workbuddy/state')
+    const cnDuring = during.json.regions.find((entry) => entry.id === 'cn')
+    assert.equal(cnDuring.pending, true, 'a deployment with an account signing in reports pending')
+    assert.equal(cnDuring.accounts.some((entry) => entry.pending === true), false, 'no listed account could have said so: the account being added does not exist yet')
+    assert.equal(cnDuring.loginUrl, 'https://www.workbuddy.cn/login?state=st', 'the host publishes the link itself, so a reloaded panel can still hand it over')
+    assert.equal(typeof cnDuring.pendingSince, 'number', 'and says since when it has been waiting')
+    assert.equal(during.json.regions.find((entry) => entry.id === 'intl').pending, false, 'the other deployment is untouched')
+  } finally {
+    pendingLogins.delete('cn:acc-not-yet')
+  }
+  const settled = await call('GET', '/workbuddy/state')
+  assert.equal(settled.json.regions.find((entry) => entry.id === 'cn').pending, false, 'and it settles when the flow ends')
+  assert.equal(settled.json.regions.find((entry) => entry.id === 'cn').loginUrl, null, 'with no link left behind')
+
+  // 取消这次登录: the flow lives on the host, so cancelling has to clear it there and answer
+  // with the state the panel redraws from — otherwise 等待授权… sits on screen with nothing to
+  // click until the five-minute poll gives up.
+  pendingLogins.set('cn:acc-cancel', { url: 'https://www.workbuddy.cn/login?state=st2', startedAt: Date.now() })
+  const cancelled = await call('POST', '/workbuddy/login/cancel', { region: 'cn' })
+  assert.equal(cancelled.status, 200)
+  assert.equal(cancelled.json.cancelled, 1, 'the in-flight login is cancelled')
+  assert.equal(pendingLogins.has('cn:acc-cancel'), false, 'and is gone from the host')
+  assert.equal(cancelled.json.regions.find((entry) => entry.id === 'cn').pending, false, 'which the returned state already reflects')
 }
 
 // A composition without the llm service (headless, or an older harness) must

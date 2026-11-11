@@ -229,7 +229,7 @@ const region = (overrides) => ({
   expiresAt: Date.now() + 3_600_000,
   refreshable: true,
   models: 2,
-  credits: { ok: true, total: 1293.5, daily: 120, unlimited: false, packages: [], at: Date.now() },
+  credits: { ok: true, total: 1234.5, daily: 120, unlimited: false, packages: [], at: Date.now() },
   checkin: { supported: true, ok: true, todayCheckedIn: true, streakDays: 3, weekProgress: [1, 1, 1, 0, 0, 0, 0], active: true },
   lastClaim: { day: '2026-10-22', claimed: true, credit: 300, at: Date.now() },
   hasBusy: true,
@@ -251,10 +251,13 @@ const signedInState = {
  * `expiresAt: 0`. A remembered expiry with `loggedIn: false` would mean the
  * token lapsed, which the panel words as 已过期 instead.
  */
+// A signed-out deployment answers with an EMPTY account list: the host only publishes
+// accounts it can read a token for, because a row nobody can read a token for can only ever
+// say 未知 / 未登录 and can neither be called nor signed out.
 const signedOutState = {
   regions: [
-    region({ loggedIn: false, expiresAt: 0, nickname: '', credits: null, checkin: null, lastClaim: null, models: 0 }),
-    region({ id: 'intl', provider: '@huai_xin/dsh-workbuddy/intl', loggedIn: false, expiresAt: 0, nickname: '', credits: null, checkin: null, lastClaim: null, models: 0, hasBusy: false })
+    region({ loggedIn: false, expiresAt: 0, nickname: '', accounts: [], credits: null, checkin: null, lastClaim: null, models: 0 }),
+    region({ id: 'intl', provider: '@huai_xin/dsh-workbuddy/intl', loggedIn: false, expiresAt: 0, nickname: '', accounts: [], credits: null, checkin: null, lastClaim: null, models: 0, hasBusy: false })
   ],
   importToken: 'token',
   version: '0.0.0-test',
@@ -288,6 +291,9 @@ const models = [
     // three tags overflowed), while the details keep both.
     promotion: { label: '夜间折扣', color: '#d89614', kind: 'discount', text: 'nightly discount' },
     availability: { state: 'dead', detail: '模型不存在', at: Date.now() },
+    // Suspended by the sweep rather than by the user: the row has to say which, because one
+    // of the two comes back on its own.
+    autoOff: true,
     enabled: false,
     decided: false
   },
@@ -338,7 +344,7 @@ const renderPanel = () => render(Panel, wrapper.props)
 installFetch({ state: signedInState, models, busy: { hy3: 'busy' } })
 const signedInTree = await renderPanel()
 const signedInText = textsOf(signedInTree)
-for (const expected of ['账户', '大陆版', '海外版', '示例账号', '可用模型', '不可用模型', 'Hy3', 'Free now', '繁忙', '未知', '0.08x', 'GPT-5.3-Codex', '检测可用性', '全部启用']) {
+for (const expected of ['账户', '大陆版', '海外版', '示例账号', '1 个账号', '可用模型', '不可用模型', 'Hy3', 'Free now', '繁忙', '未知', '0.08x', 'GPT-5.3-Codex', '检测可用性', '全部启用']) {
   assert.ok(signedInText.includes(expected), `the panel renders ${expected}`)
 }
 assert.ok(titlesOf(signedInTree).some((title) => title.startsWith('繁忙程度：')), 'the load tag explains itself in a tooltip')
@@ -362,6 +368,12 @@ assert.ok(titlesOf(signedInTree).some((title) => title.startsWith('繁忙程度�
   assert.equal(cn.region, 'cn')
   assert.equal(cn.loggedIn, true)
   assert.equal(typeof cn.credits, 'number', 'the balance travels with the snapshot')
+  // A deployment can hold several accounts; the published snapshot says how many there
+  // are and how many can actually be called, so a consumer offering "switch account"
+  // does not have to guess. The fixture answers the single-account shape, so both read 0
+  // here — the point is that the fields exist and are numbers, not that they are large.
+  assert.equal(typeof cn.accounts, 'number')
+  assert.equal(typeof cn.accountsUsable, 'number')
 
   // Four fields per model. Keys and values are both English, and the values are fixed tokens
   // rather than dictionary lookups: the same model must report `rate limited` in a Chinese UI
@@ -458,6 +470,15 @@ const hasClass = (node, name) => String(node.props?.className ?? '').split(/\s+/
   assert.ok(!rowText(dead).includes('夜间折扣'), 'the unusable row drops the promotion tag')
   assert.ok(rowText(alive).includes('Free now'), 'the usable row keeps its promotion')
   assert.ok(rowText(alive).includes('繁忙'), 'and its busy level')
+
+  // A model the sweep switched off says so, and its switch explains itself differently: the
+  // user did not turn this one off, and it comes back on its own once it answers again.
+  assert.ok(rowText(dead).includes('已自动停用'), 'a suspended model says it was switched off automatically')
+  assert.ok(!rowText(alive).includes('已自动停用'), 'and a model that works says nothing of the sort')
+  const deadSwitch = nodesOf(dead).find((node) => node.props?.role === 'switch')
+  const aliveSwitch = nodesOf(alive).find((node) => node.props?.role === 'switch')
+  assert.match(String(deadSwitch.props.title), /恢复可用/, 'its switch says the suspension lifts by itself')
+  assert.notEqual(deadSwitch.props.title, aliveSwitch.props.title, 'which is not what a model switched off by hand says')
 }
 
 // A model switch must cost one request.
@@ -496,31 +517,68 @@ const hasClass = (node, name) => String(node.props?.className ?? '').split(/\s+/
 const accountCard = nodesOf(signedInTree).find((node) => hasClass(node, 'wb-account-card'))
 assert.ok(accountCard, 'the account card has its own styling scope')
 const accountNodes = nodesOf(accountCard)
-const deploymentHeads = accountNodes.filter((node) => hasClass(node, 'wb-deploy'))
-assert.deepEqual(deploymentHeads.map((node) => node.props.style.gridColumn), [2, 3], 'deployments occupy the two account columns')
-assert.ok(textsOf(deploymentHeads[0]).includes('大陆版'))
-assert.ok(textsOf(deploymentHeads[1]).includes('海外版'))
-const creditActions = accountNodes.filter((node) => hasClass(node, 'wb-cell-actions'))
-assert.equal(creditActions.length, 2, 'each balance keeps its own refresh and plans controls')
-for (const actions of creditActions) {
-  const buttons = nodesOf(actions).filter((node) => node.type === 'button')
-  assert.equal(buttons.length, 2)
-  assert.equal(buttons[0].props['aria-label'], '刷新积分')
-  assert.ok(textsOf(buttons[1]).includes('套餐'))
-  assert.ok(buttons.every((node) => typeof node.props.onClick === 'function'))
+// Deployments are stacked blocks now, not columns: each carries its own head row
+// (dot, name, summed balance, its bulk actions), its accounts and an add-account foot.
+const poolBlocks = accountNodes.filter((node) => hasClass(node, 'wb-pool-block'))
+assert.equal(poolBlocks.length, 2, 'one block per deployment, stacked')
+assert.ok(textsOf(poolBlocks[0]).includes('大陆版'), 'the mainland deployment comes first')
+assert.ok(textsOf(poolBlocks[1]).includes('海外版'))
+for (const block of poolBlocks) {
+  const head = nodesOf(block).find((node) => hasClass(node, 'wb-pool-head'))
+  assert.ok(head !== undefined, 'each block has a head row')
+  assert.ok(nodesOf(head).some((node) => hasClass(node, 'wb-pool-name')), 'the head names the deployment')
+  assert.ok(nodesOf(head).some((node) => hasClass(node, 'wb-credits-value')), 'and carries the summed balance')
+  assert.ok(nodesOf(head).some((node) => hasClass(node, 'wb-link-btn') && textsOf(node).includes('套餐')), 'the plans link is on the head')
+  // No account count in the head: the rows below it already say how many there are.
+  assert.equal(nodesOf(head).filter((node) => hasClass(node, 'wb-pool-count')).length, 0, 'the head does not repeat the account count')
+  // The total reads "总积分 <figure>": the label leads, because this figure is a sum.
+  const headText = textsOf(head).join('|')
+  assert.ok(headText.includes('总积分'), 'the summed balance is labelled')
+  assert.ok(!headText.includes('合计'), 'the old wording is gone')
 }
-assert.equal(accountNodes.filter((node) => node.type === 'button' && textsOf(node).includes('续期')).length, 1)
+// One row per account, each with its own four controls.
+const accountRows = accountNodes.filter((node) => hasClass(node, 'wb-acct'))
+assert.equal(accountRows.length, 2, 'one row per signed-in account')
+for (const row of accountRows) {
+  assert.ok(nodesOf(row).some((node) => hasClass(node, 'wb-acct-name')), 'the row names the account')
+  const buttons = nodesOf(row).filter((node) => node.type === 'button')
+  assert.ok(buttons.some((node) => node.props['aria-label'] === '刷新积分'), 'the row re-reads its own balance')
+  assert.ok(buttons.some((node) => textsOf(node).includes('续期')), 'the row can be renewed on its own')
+  assert.ok(buttons.some((node) => textsOf(node).includes('退出登录')), 'the row can be signed out on its own')
+  // 更换账号 was removed: 添加账号 plus 退出登录 already covers replacing an account, and
+  // two paths to the same thing is one too many.
+  assert.ok(!buttons.some((node) => textsOf(node).includes('更换账号')), 'there is no separate re-authorize button')
+  assert.ok(buttons.every((node) => typeof node.props.onClick === 'function'))
+  // The balance sits at the right edge, in its own element, not in the muted meta text.
+  const credits = nodesOf(row).find((node) => hasClass(node, 'wb-acct-credits'))
+  assert.ok(credits !== undefined, 'the row shows its own balance')
+  assert.ok(nodesOf(credits).some((node) => hasClass(node, 'wb-credits-value')), 'and it is the accent-coloured figure')
+  assert.ok(!textsOf(row).join('|').includes('到期'), 'no expiry: the claim is not what the server honours')
+}
+// Every block ends with 添加账号 - the feature that makes several accounts possible.
+const addButtons = accountNodes.filter((node) => node.type === 'button' && textsOf(node).includes('添加账号'))
+assert.equal(addButtons.length, 2, 'each deployment offers 添加账号')
+for (const button of addButtons) {
+  assert.equal(typeof button.props.onClick, 'function')
+  assert.ok(typeof button.props.title === 'string' && button.props.title.length > 0, 'the add button explains the fallback order')
+}
 const stylesheet = textsOf(nodesOf(signedInTree).find((node) => node.type === 'style')).join('')
-assert.match(stylesheet, /grid-template-columns: 56px repeat\(var\(--wb-cols\), minmax\(180px, 1fr\)\)/, 'account columns fill the card without an empty trailing column')
-assert.match(stylesheet, /grid-template-rows: repeat\(4, 52px\) 34px/, 'only the action row is compacted')
-assert.match(stylesheet, /\.wb-table-split::before \{[^}]*position: absolute; left: 50%;/, 'the divider is centred on the card without shifting account columns')
-assert.match(stylesheet, /\.wb-cell-actions \{ flex: none;/, 'balance actions stay beside the number rather than against the far edge')
+assert.match(stylesheet, /\.wb-pool-block \+ \.wb-pool-block \{ margin-top: 10px; \}/, 'blocks stack instead of sitting in columns')
+assert.ok(!stylesheet.includes('wb-table-split'), 'the old column table is gone')
+assert.match(stylesheet, /\.wb-acct \{ display: flex;/, 'an account is one row')
 
-// 2) Signed out: the sign-in path, and no stale account values.
+// 2) Signed out: the block still renders, with 添加账号 available and no stale values.
 installFetch({ state: signedOutState, models: [] })
 const signedOutTree = await renderPanel()
-assert.ok(textsOf(signedOutTree).includes('登录'), 'a signed-out deployment offers sign-in')
+assert.ok(textsOf(signedOutTree).includes('添加账号'), 'a signed-out deployment still offers 添加账号')
 assert.ok(titlesOf(signedOutTree).includes('未登录'), 'the status dot reports the deployment as signed out')
+const signedOutText = textsOf(signedOutTree)
+assert.ok(signedOutText.includes('这一栏还没有账号，点「添加账号」登录'), 'an empty pool says so instead of drawing a blank block')
+// The deployment's own total may legitimately read 未知 while signed out; what must not
+// survive is an ACCOUNT row, since a tokenless entry can only ever read 未知 / 未登录 and can
+// neither be called nor signed out.
+assert.ok(!nodesOf(signedOutTree).some((node) => hasClass(node, 'wb-acct')), 'no account row survives a logout')
+assert.ok(!nodesOf(signedOutTree).some((node) => hasClass(node, 'wb-acct-credits')), 'no per-account balance survives a logout')
 
 // 3) The Host is unreachable: the panel reports it instead of rendering blank.
 installFetch({ state: signedOutState, models: [], fail: true })
@@ -579,4 +637,87 @@ assert.ok(textsOf(failedTree).some((text) => text.includes('offline')), 'a faile
   assert.ok(!/k|m/.test(String(formatTokens(2000000))), 'suffixes are upper case')
 }
 
-console.log('client.mjs: OK — registration, dictionaries, three full panel renders, same-name ordering, and token units verified')
+// 6) Several accounts in one deployment: the tab counts them, every one gets a row, and the
+// figure at the top is the deployment's total rather than one account's balance.
+{
+  const twoAccounts = {
+    regions: [
+      region({
+        accounts: [
+          { id: 'primary', nickname: '示例账号', loggedIn: true, hasToken: true, expiresAt: Date.now() + 3_600_000, refreshable: true, pending: false, credits: { ok: true, total: 1000.5, daily: 0, unlimited: false, packages: [] }, checkin: null, lastClaim: null },
+          { id: 'acc-2', nickname: '示例小号', loggedIn: true, hasToken: true, expiresAt: Date.now() + 3_600_000, refreshable: true, pending: false, credits: { ok: true, total: 234, daily: 0, unlimited: false, packages: [] }, checkin: null, lastClaim: null }
+        ],
+        credits: { ok: true, total: 1234.5, daily: 0, unlimited: false, packages: [], at: Date.now() }
+      }),
+      region({ id: 'intl', provider: '@huai_xin/dsh-workbuddy/intl', nickname: '900000001', models: 1, hasBusy: false, checkin: null, lastClaim: null })
+    ],
+    importToken: 'token',
+    version: '0.0.0-test',
+    codeStamp: 'test'
+  }
+  installFetch({ state: twoAccounts })
+  const pooledTree = await renderPanel()
+  const pooledText = textsOf(pooledTree)
+  assert.ok(pooledText.includes('2 个账号'), 'the tab counts the deployment\'s accounts rather than naming one')
+  assert.ok(pooledText.includes('示例账号'), 'every account keeps its own row')
+  assert.ok(pooledText.includes('示例小号'))
+  assert.ok(pooledText.includes('1234.50'), 'and the figure at the top is the total the host summed')
+  assert.ok(pooledText.includes('1000.50') && pooledText.includes('234'), 'each account shows its own balance')
+}
+
+// 7) A login waiting for the browser is a fact about the HOST — it minted the link and it runs
+// the poll — so the panel must be able to draw that link even after it was reloaded, and it
+// must offer a way out of a flow that would otherwise sit there forever.
+{
+  const pendingState = {
+    regions: [
+      region({
+        loggedIn: false,
+        pending: true,
+        loginUrl: 'https://www.workbuddy.cn/login/auth?state=st-1',
+        pendingSince: Date.now(),
+        nickname: '',
+        expiresAt: 0,
+        credits: null,
+        checkin: null,
+        lastClaim: null,
+        models: 0
+      }),
+      region({ id: 'intl', provider: '@huai_xin/dsh-workbuddy/intl', nickname: '900000001', models: 1, hasBusy: false })
+    ],
+    importToken: 'token',
+    version: '0.0.0-test',
+    codeStamp: 'test'
+  }
+  // A pending deployment is what makes the panel poll for the outcome, and this React never runs
+  // effect cleanups — so the interval is captured here and stopped, or the process would never
+  // exit once the last line is printed.
+  const realSetInterval = globalThis.setInterval
+  const intervals = []
+  globalThis.setInterval = (fn, ms) => {
+    const handle = realSetInterval(fn, ms)
+    intervals.push(handle)
+    return handle
+  }
+  let pendingTree
+  try {
+    installFetch({ state: pendingState })
+    pendingTree = await renderPanel()
+  } finally {
+    globalThis.setInterval = realSetInterval
+    for (const handle of intervals) {
+      handle.unref?.()
+      clearInterval(handle)
+    }
+  }
+  const pendingText = textsOf(pendingTree)
+  assert.ok(intervals.length >= 1, 'a login in flight is what makes the panel watch it')
+  assert.ok(pendingText.includes('等待授权…'), 'the deployment says a login is waiting')
+  assert.ok(
+    pendingText.includes('https://www.workbuddy.cn/login/auth?state=st-1'),
+    'the link is drawn from the host, so a reloaded panel can still hand it over'
+  )
+  assert.ok(pendingText.includes('取消这次登录'), 'and the waiting login can be abandoned')
+}
+
+console.log('client.mjs: OK — registration, dictionaries, four full panel renders, account counts, same-name ordering, waiting-login callout, and token units verified')

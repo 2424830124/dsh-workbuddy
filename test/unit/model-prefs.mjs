@@ -16,7 +16,7 @@ import { join } from 'node:path'
 process.env.DSH_HOME = join(tmpdir(), 'dsh-workbuddy-prefs-test')
 rmSync(process.env.DSH_HOME, { recursive: true, force: true })
 
-const { isEnabled, readPrefs, setEnabled, markLoggedOut, clearLoggedOut } = await import('../../src/catalog/model-prefs.js')
+const { isEnabled, readPrefs, setEnabled, setAutoOff, markLoggedOut, clearLoggedOut } = await import('../../src/catalog/model-prefs.js')
 const { probeBody } = await import('../../src/catalog/availability.js')
 const { REGIONS } = await import('../../src/core/regions.js')
 
@@ -78,6 +78,44 @@ assert.equal(isEnabled(readPrefs('cn'), 'hy3'), true, 'and comes back with the n
   assert.equal(isEnabled(migrated, 'legacy-off'), false, 'and the old off list is dropped, which is now the default anyway')
 }
 
+// The sweep suspends what the user had on, instead of overwriting the choice: the file keeps
+// both facts, so a model that recovers returns to exactly the switch position it had.
+{
+  setEnabled('cn', ['hy3', 'glm-4.6'], true)
+  const suspended = setAutoOff('cn', { suspend: ['hy3', 'never-enabled'] })
+  assert.equal(suspended.suspended, 1, 'only a model the user had turned on is worth suspending')
+  const after = readPrefs('cn')
+  assert.equal(isEnabled(after, 'hy3'), false, 'a suspended model is not offered')
+  assert.deepEqual([...after.enabled].sort(), ['glm-4.6', 'hy3'], 'the choice itself is still on disk')
+  assert.deepEqual([...after.autoOff], ['hy3'], 'the suspension is recorded next to it, not instead of it')
+  assert.equal(after.autoOff.has('never-enabled'), false)
+
+  // Nothing to change writes nothing, so a quiet sweep does not touch the file.
+  assert.deepEqual(setAutoOff('cn', { suspend: ['hy3'] }), { saved: true, suspended: 0, resumed: 0 })
+
+  const resumed = setAutoOff('cn', { resume: ['hy3'] })
+  assert.equal(resumed.resumed, 1)
+  assert.equal(isEnabled(readPrefs('cn'), 'hy3'), true, 'when the verdict clears the model comes back untouched')
+
+  // Flipping the switch by hand is an opinion, so it also cancels a suspension — otherwise
+  // the suspension would swallow the switch the user just turned on.
+  setAutoOff('cn', { suspend: ['hy3'] })
+  assert.equal(isEnabled(readPrefs('cn'), 'hy3'), false)
+  setEnabled('cn', ['hy3'], true)
+  assert.deepEqual([...readPrefs('cn').autoOff], [], 'turning it on clears the suspension')
+  assert.equal(isEnabled(readPrefs('cn'), 'hy3'), true)
+  setEnabled('cn', ['hy3'], false)
+  assert.deepEqual([...readPrefs('cn').enabled], ['glm-4.6'], 'and turning it off leaves only the other choice behind')
+
+  // A v2 file has no autoOff key and must still load as "nothing suspended".
+  const { writeFileSync } = await import('node:fs')
+  writeFileSync(join(process.env.DSH_HOME, 'dsh-workbuddy', 'enabled-cn.json'),
+    JSON.stringify({ version: 2, updatedAt: 1, enabled: ['hy3'] }))
+  const v2 = readPrefs('cn')
+  assert.deepEqual([...v2.autoOff], [], 'an older file simply has no suspensions')
+  assert.equal(isEnabled(v2, 'hy3'), true)
+}
+
 // The probe shape follows the deployment: free where the gateway resolves the
 // model first, a one-token completion where it validates the conversation first.
 const cnBody = probeBody(REGIONS.cn, 'hy3')
@@ -87,4 +125,4 @@ const intlBody = probeBody(REGIONS.intl, 'hy3')
 assert.equal(intlBody.messages[0].role, 'system', 'international needs a system-first conversation')
 assert.equal(intlBody.max_tokens, 1, 'international probes ask for a single token')
 
-console.log('model-prefs.mjs: OK — off by default, the recorded set, bulk toggles, logout survival, v1 migration, and per-deployment probe shapes verified')
+console.log('model-prefs.mjs: OK — off by default, the recorded set, bulk toggles, suspension and recovery, logout survival, v1 migration, and per-deployment probe shapes verified')

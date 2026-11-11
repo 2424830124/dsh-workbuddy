@@ -137,53 +137,67 @@ const groups = (list) => {
 }
 
 /**
- * The account card, transposed: deployments are columns, fields are rows.
- * Mirrors `accountGrid()` in the component, including the single centred
- * sign-in button a signed-out deployment gets in place of four empty rows.
+ * The account card: one stacked block per deployment.
+ *
+ * Mirrors `poolBlock()` / `accountRow()` in the component — a head row with the
+ * deployment, its account count and the summed balance, then one row per account,
+ * then 添加账号. Accounts are the reason this is stacked: a column wide enough for
+ * a balance is not wide enough for four buttons per account.
  */
-const accountCard = (accounts) => {
-  const fields = ['账号', '到期', '积分', '操作']
-  const cells = ['<span class="wb-row-label" style="grid-row:1;grid-column:1">部署</span>']
-  fields.forEach((label, index) => {
-    cells.push(`<span class="wb-row-label" style="grid-row:${index + 2};grid-column:1">${label}</span>`)
-  })
-  accounts.forEach((account, index) => {
-    const column = index + 2
-    cells.push(`<div class="wb-th wb-deploy" style="grid-row:1;grid-column:${column}" title="${account.endpoint}">
-        <span class="wb-deploy-dot" style="background:${account.statusColor}" title="${account.status}"></span>
-        <span>${account.region}</span>
-        ${account.checkin ? `<button type="button" class="wb-btn"${account.checkedIn ? ' disabled' : ''} title="上次自动领取：2026/10/21 09:12:03 · +300 积分">${account.checkedIn ? '今日已签到' : '立即领取'}</button>` : ''}
-      </div>`)
-    if (!account.loggedIn) {
-      // While the first answer is still in flight the cell says so instead of
-      // offering a sign-in button; that is what `loading` renders below.
-      cells.push(`<div class="wb-td wb-td-span" style="grid-row:2 / span ${fields.length};grid-column:${column}">
-        ${account.loading === true ? '<span class="wb-loading">加载中…</span>' : '<button type="button" class="wb-btn wb-btn-primary">登录</button>'}
-      </div>`)
-      return
-    }
-    const cell = (row, inner, last = false, extra = '') => `<div class="wb-td${last ? ' wb-td-last' : ''}${extra}" style="grid-row:${row + 2};grid-column:${column}">${inner}</div>`
-    cells.push(cell(0, `<span class="wb-account-name">${account.nickname}</span>`))
-    cells.push(cell(1, `<span class="wb-num">${account.expires}</span>`))
-    cells.push(cell(2, `<span class="wb-credits-value">${account.credits}</span>
-        <span class="wb-cell-actions">
-          <button type="button" class="wb-icon-btn" title="刷新积分">⟳</button>
+const accountBlock = (deployment) => {
+  const accounts = deployment.accounts ?? []
+  const checkin = deployment.checkin
+    ? `<button type="button" class="wb-btn"${deployment.checkedIn ? ' disabled' : ''} title="上次自动领取：2026/10/21 09:12:03 · +300 积分">${deployment.checkedIn ? '今日已签到' : '立即领取'}</button>`
+    : ''
+  const rows = accounts.length === 0
+    ? '<div class="wb-acct-empty">这一栏还没有账号，点「添加账号」登录</div>'
+    : accounts.map((account) => `<div class="wb-acct">
+        <span class="wb-acct-name" title="${account.id ?? 'primary'}">
+          <span class="wb-deploy-dot" style="background:${account.statusColor}"></span>
+          ${account.nickname || '未知'}
+        </span>
+        ${account.loggedIn ? '' : '<span class="wb-tag wb-tag-warn">未登录</span>'}
+        <span class="wb-acct-credits" title="该账号的积分">
+          ${account.credits ? `<span class="wb-credits-value">${account.credits}</span>` : '<span class="wb-muted">未知</span>'}
+        </span>
+        <span class="wb-acct-actions">
+          <button type="button" class="wb-icon-btn" title="刷新积分" aria-label="刷新积分">⟳</button>
+          <button type="button" class="wb-btn wb-btn-ghost" title="只续期这一个账号">续期</button>
+          <button type="button" class="wb-btn wb-btn-danger">退出登录</button>
+        </span>
+      </div>`).join('\n      ')
+  return `<div class="wb-pool-block">
+      <div class="wb-pool-head">
+        <span class="wb-pool-name" title="${deployment.endpoint}">
+          <span class="wb-deploy-dot" style="background:${deployment.statusColor}" title="${deployment.status}"></span>
+          ${deployment.region}
+        </span>
+        <span class="wb-pool-credits">
+          <span class="wb-acct-meta">总积分</span>
+          ${deployment.total ? `<span class="wb-credits-value" title="这一栏所有账号的积分之和">${deployment.total}</span>` : '<span class="wb-muted">未知</span>'}
+        </span>
+        <span class="wb-pool-actions">
+          ${checkin}
           <button type="button" class="wb-link-btn" title="在浏览器打开该部署的官方套餐页（用量与订阅）">套餐</button>
-        </span>`, false, ' wb-td-credits'))
-    cells.push(cell(3, `<button type="button" class="wb-btn wb-btn-primary">更换账号</button>
-        <button type="button" class="wb-btn wb-btn-danger">退出登录</button>`, true))
-  })
-  return `<div class="wb-card wb-account-card">
+          <button type="button" class="wb-icon-btn" title="刷新积分" aria-label="刷新积分">⟳</button>
+        </span>
+      </div>
+      ${rows}
+      <div class="wb-pool-foot">
+        <button type="button" class="wb-btn wb-btn-primary" title="再登录一个账号：它排在这一栏的最后，前一个账号积分不足或限流时才会用到它">添加账号</button>
+      </div>
+    </div>`
+}
+
+const accountCard = (deployments) => `<div class="wb-card wb-account-card">
     <div class="wb-card-head">
       <span class="wb-logo" aria-hidden="true"></span>
       <span class="wb-card-title">账户</span>
-      <div class="wb-head-right"><button type="button" class="wb-btn" title="两个部署一起续期（未登录的跳过）">续期</button></div>
     </div>
-    <div class="wb-table wb-table-split" role="table" style="--wb-cols:${accounts.length}">
-      ${cells.join('\n      ')}
+    <div class="wb-pool">
+      ${deployments.map(accountBlock).join('\n      ')}
     </div>
   </div>`
-}
 
 const panel = (options) => `<section class="wb-root">
   <h2 class="wb-title">WorkBuddy 模型</h2>
@@ -212,14 +226,31 @@ const panel = (options) => `<section class="wb-root">
   </div>
 </section>`
 
-const bothSignedIn = [
-  { region: '大陆版', nickname: '示例账号', expires: '2027/01/16 09:00:00', credits: '1280.00', loggedIn: true, status: '已登录', statusColor: '#3fa45b', endpoint: 'workbuddy-cn · https://www.workbuddy.cn', checkin: true, checkedIn: true },
-  { region: '海外版', nickname: '900000001', expires: '2027/04/21 12:00:00', credits: '360.00', loggedIn: true, status: '已登录', statusColor: '#3fa45b', endpoint: 'workbuddy-intl · https://www.workbuddy.ai', checkin: false }
+/** Two deployments, the mainland one holding two accounts. */
+const signedIn = [
+  {
+    region: '大陆版', status: '已登录', statusColor: '#3fa45b', endpoint: 'workbuddy-cn · https://www.workbuddy.cn',
+    checkin: true, checkedIn: true, total: '1234.50',
+    accounts: [
+      { id: 'primary', nickname: '示例账号', credits: '1000.50', loggedIn: true, statusColor: '#3fa45b' },
+      { id: 'acc-2', nickname: '示例小号', credits: '234.00', loggedIn: true, statusColor: '#3fa45b' }
+    ]
+  },
+  {
+    region: '海外版', status: '已登录', statusColor: '#3fa45b', endpoint: 'workbuddy-intl · https://www.workbuddy.ai',
+    checkin: false, total: '360.00',
+    accounts: [
+      { id: 'primary', nickname: '900000001', credits: '360.00', loggedIn: true, statusColor: '#3fa45b' }
+    ]
+  }
 ]
 
 const oneSignedOut = [
-  { region: '大陆版', nickname: '', expires: '', credits: '', loggedIn: false, status: '未登录', statusColor: '#8a8f98', endpoint: 'workbuddy-cn · https://www.workbuddy.cn' },
-  bothSignedIn[1]
+  {
+    region: '大陆版', status: '未登录', statusColor: '#8a8f98', endpoint: 'workbuddy-cn · https://www.workbuddy.cn',
+    checkin: false, total: '', accounts: []
+  },
+  signedIn[1]
 ]
 
 /** The panel loads the mark from the Host; a file:// page cannot, so the same
@@ -240,15 +271,15 @@ ${css}
 .wb-logo { -webkit-mask-image: url('${maskDataUri}'); mask-image: url('${maskDataUri}'); }
 </style></head>
 <body>
-  <div class="frame"><p class="label">两个账号都已登录 · 大陆版标签</p>${panel({
+  <div class="frame"><p class="label">大陆版有两个账号，积分是合计 · 大陆版标签</p>${panel({
     active: 'cn',
-    accounts: bothSignedIn,
+    accounts: signedIn,
     models: cnModels,
     sourceHint: ''
   })}</div>
-  <div class="frame"><p class="label">未登录 / 加载中：控件都在，但都点不了</p>${panel({
+  <div class="frame"><p class="label">海外版还没有账号：只有「添加账号」可以点</p>${panel({
     active: 'cn',
-    accounts: [bothSignedIn[0], { ...bothSignedIn[1], loggedIn: false, loading: true, nickname: '', expires: '', credits: '', status: '未登录', statusColor: '#8a8f98' }],
+    accounts: [signedIn[0], { ...signedIn[1], total: '', accounts: [] }],
     models: [],
     disabled: true
   })}</div>

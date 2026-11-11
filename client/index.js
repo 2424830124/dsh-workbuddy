@@ -45,11 +45,6 @@ window.__ModuleLoader__.load({
         regionIntl: '海外版',
         regionCn: '大陆版',
         cardAccounts: '账户',
-        colDeploy: '部署',
-        colAccount: '账号',
-        colExpires: '到期',
-        colCredits: '积分',
-        colActions: '操作',
         refreshCredits: '刷新积分',
         openPlans: '套餐',
         openPlansHint: '在浏览器打开该部署的官方套餐页（用量与订阅）',
@@ -57,7 +52,6 @@ window.__ModuleLoader__.load({
         creditsRate: '消耗速度（实时）',
         models: '模型',
         login: '登录',
-        switchAccount: '更换账号',
         loggingIn: '等待授权…',
         refreshList: '刷新列表',
         logout: '退出登录',
@@ -69,16 +63,18 @@ window.__ModuleLoader__.load({
         loading: '加载中…',
         unknown: '未知',
         count: (n) => `${n} 个`,
+        accountCount: (n) => `${n} 个账号`,
         loginHint: '已在系统浏览器打开授权页面；完成授权后本页会自动刷新。若浏览器没有打开，请复制下面的链接手动访问：',
         copy: '复制链接',
         copied: '已复制',
+        cancelLogin: '取消这次登录',
         emptyModels: '没有读取到模型',
         catalogUnavailable: '取不到模型列表，点「刷新列表」重试',
         catalogCache: '本地缓存',
         saveFailed: '保存失败，这次改动没有写入磁盘',
         checkAvailability: '检测可用性',
         checking: '检测中…',
-        availabilityHint: '向白名单外的模型各发一个最小请求，判定其是否真的可用（不可用的会从列表移除）',
+        availabilityHint: '给每个模型各发一个最小请求，判定它是不是真的可用；判定为不可用的会自动停用并移到「不可用模型」分组，等它恢复可用，开关会回到你原来的状态',
         availabilityResult: (ok, dead) => `检测：可用 ${ok} / 不可用 ${dead}`,
         statusLoggedIn: '已登录',
         statusLoggedOut: '未登录',
@@ -111,6 +107,8 @@ window.__ModuleLoader__.load({
         detailDescription: '描述',
         detailModality: '模态',
         freeModel: '免费',
+        autoOff: '已自动停用',
+        autoOffHint: '探测到它当前不可用，已自动停用；等它恢复可用，开关会回到你原来的状态',
         promoDiscount: '折扣',
         detailPromoKind: '促销类型',
         detailPromoWindow: '促销时限',
@@ -124,7 +122,16 @@ window.__ModuleLoader__.load({
         busyUnknown: '未知',
         modalityText: '文本',
         modalityImage: '图像',
-        noModels: '登录后这里会显示该账号可用的模型'
+        noModels: '登录后这里会显示这个部署可用的模型',
+        addAccount: '添加账号',
+        addAccountHint: '再登录一个账号：它排在这一栏的最后，前一个账号积分不足或限流时才会用到它',
+        noAccounts: '这一栏还没有账号，点「添加账号」登录',
+        totalCredits: '总积分',
+        totalCreditsHint: '这一栏所有账号的积分之和',
+        accountCredits: '该账号的积分',
+        renewAccount: '续期',
+        renewAccountHint: '只续期这一个账号',
+        primaryAccountHint: '这个部署原有的账号（凭据就存在原来的位置）'
       },
       en: {
         section: 'WorkBuddy',
@@ -133,11 +140,6 @@ window.__ModuleLoader__.load({
         regionIntl: 'Overseas',
         regionCn: 'Mainland',
         cardAccounts: 'Accounts',
-        colDeploy: 'Deployment',
-        colAccount: 'Account',
-        colExpires: 'Expires',
-        colCredits: 'Credits',
-        colActions: 'Actions',
         refreshCredits: 'Refresh credits',
         openPlans: 'Plans',
         openPlansHint: 'Open this deployment’s official plans page in your browser',
@@ -145,7 +147,6 @@ window.__ModuleLoader__.load({
         creditsRate: 'Consumption rate (live)',
         models: 'Models',
         login: 'Sign in',
-        switchAccount: 'Switch account',
         loggingIn: 'Awaiting authorization…',
         refreshList: 'Refresh list',
         logout: 'Sign out',
@@ -157,16 +158,18 @@ window.__ModuleLoader__.load({
         loading: 'Loading…',
         unknown: 'unknown',
         count: (n) => `${n}`,
+        accountCount: (n) => `${n} account${n === 1 ? '' : 's'}`,
         loginHint: 'The authorization page was opened in your browser; this panel refreshes once you finish. If nothing opened, copy this link:',
         copy: 'Copy link',
         copied: 'Copied',
+        cancelLogin: 'Cancel this login',
         emptyModels: 'No models were returned',
         catalogUnavailable: 'No model list available — try “Refresh list”',
         catalogCache: 'cached locally',
         saveFailed: 'Save failed — this change was not written to disk',
         checkAvailability: 'Check availability',
         checking: 'Checking…',
-        availabilityHint: 'Probes each non-whitelisted model with one request that cannot generate tokens; unusable models are removed from the list.',
+        availabilityHint: 'Probes every model with one request that cannot generate tokens; one that fails is switched off and moved to the unusable group, and returns to where you left it once it answers again',
         availabilityResult: (ok, dead) => `checked: ${ok} usable / ${dead} unusable`,
         statusLoggedIn: 'Signed in',
         statusLoggedOut: 'Not signed in',
@@ -191,7 +194,6 @@ window.__ModuleLoader__.load({
         stateNoQuota: 'out of credits',
         stateThrottled: 'rate limited',
         stateUnknown: 'unknown',
-        stateAvailable: 'available',
         detailId: 'ID',
         detailContext: 'Context',
         detailMaxOutput: 'Max output',
@@ -200,6 +202,8 @@ window.__ModuleLoader__.load({
         detailDescription: 'Description',
         detailModality: 'Modality',
         freeModel: 'free',
+        autoOff: 'auto-disabled',
+        autoOffHint: 'Probed as unusable, so this is switched off; when it answers again the switch returns to where you left it',
         promoDiscount: 'discount',
         detailPromoKind: 'Promotion',
         detailPromoWindow: 'Window',
@@ -213,7 +217,16 @@ window.__ModuleLoader__.load({
         busyUnknown: 'unknown',
         modalityText: 'text',
         modalityImage: 'image',
-        noModels: 'Models appear here once the account is signed in'
+        noModels: 'Models appear here once the deployment is signed in',
+        addAccount: 'Add account',
+        addAccountHint: 'Sign in one more account: it goes last in this block, and is only used when an earlier one is out of credits or rate limited',
+        noAccounts: 'No account in this block yet — use “Add account”',
+        totalCredits: 'Total',
+        totalCreditsHint: 'The sum of every account in this block',
+        accountCredits: 'This account’s credits',
+        renewAccount: 'Renew',
+        renewAccountHint: 'Renew this account only',
+        primaryAccountHint: 'The deployment’s original account (its credentials stay where they always were)'
       }
     }
 
@@ -256,39 +269,38 @@ window.__ModuleLoader__.load({
   -webkit-mask: url('/workbuddy/icon-mask') center / contain no-repeat;
   mask: url('/workbuddy/icon-mask') center / contain no-repeat; }
 
-/* account table — transposed: deployments are columns, fields are rows ------
-   One grid for the whole table so a signed-out deployment can occupy its whole
-   column with a single centred sign-in button. */
-.wb-table { display: grid; position: relative; padding: 0 10px 8px; overflow-x: auto; --wb-cols: 2;
-  /* No trailing spacer: both accounts need enough width for an unbroken action
-     pair in the settings column. Narrower views scroll instead of wrapping. */
-  grid-template-columns: 56px repeat(var(--wb-cols), minmax(180px, 1fr));
-  /* Fixed tracks prevent account loading or login from resizing the card; the
-     action row needs less air than the four information rows above it. */
-  grid-template-rows: repeat(4, 52px) 34px;
-  column-gap: 32px; row-gap: 0; align-items: stretch; }
-/* Centre the divider on the card, not the account-column gap: the label
-   column makes that gap visually off-centre. Account contents stay in place. */
-.wb-table-split::before { content: ''; position: absolute; left: 50%; top: 18px; bottom: 8px; width: 1px;
-  transform: translateX(-50%); pointer-events: none;
-  background: linear-gradient(to bottom, transparent, var(--wb-line-soft) 12%, var(--wb-line-soft) 92%, transparent); }
-.wb-row-label { display: flex; align-items: center; font-size: 11px; letter-spacing: .05em;
-  text-transform: uppercase; color: var(--wb-muted); }
-.wb-th { min-width: 0; display: flex; align-items: center; font-size: 12.5px; font-weight: 620; white-space: nowrap; }
-.wb-th .wb-btn { padding: 3px 8px; font-size: 11px; font-weight: 500; line-height: 1.2; }
-.wb-deploy { display: flex; align-items: center; gap: 8px; }
+/* accounts — one card per deployment, stacked ------------------------------
+   Originally a transposed table (deployments as columns, fields as rows). Once a
+   deployment can hold several accounts a column stops being wide enough for the
+   actions, and the two deployments no longer read as a pair — so each is its own
+   block: a head row with the deployment, its summed balance and its own actions,
+   then one row per account. */
+.wb-pool { padding: 0 12px 12px; }
+.wb-pool-block { border: 1px solid var(--wb-line-soft); border-radius: 12px; background: var(--wb-surface); }
+.wb-pool-block + .wb-pool-block { margin-top: 10px; }
+.wb-pool-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 11px 12px 9px; }
+.wb-pool-name { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 620; }
 .wb-deploy-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
-/* The cell fills its row and holds its content left, the way the signed-in rows
-   read; only the standalone sign-in cell is centred. No rule between rows: the
-   spacing and the vertical separator already say where the columns are. */
-.wb-td { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-/* Keep refresh and plans beside the balance, not at the far column edge. */
-.wb-cell-actions { flex: none; display: inline-flex; align-items: center; gap: 8px; }
-.wb-td-credits, .wb-td-last { flex-wrap: nowrap; }
-.wb-td-last { gap: 6px; }
-.wb-td-span { display: flex; align-items: center; justify-content: center; }
-.wb-account-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wb-num { font-variant-numeric: tabular-nums; color: var(--wb-muted); }
+/* The summed balance sits right after the deployment name, which is where the
+   eye looks for "how much is left here". */
+.wb-pool-credits { display: inline-flex; align-items: center; gap: 6px; margin-left: 2px; }
+.wb-pool-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+/* One account line: who it is, when it lapses, what can be done to it. */
+.wb-acct { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 8px 12px; border-top: 1px solid var(--wb-line-soft); font-size: 12.5px; }
+.wb-acct-name { min-width: 0; display: inline-flex; align-items: center; gap: 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-acct-meta { color: var(--wb-muted); font-variant-numeric: tabular-nums; font-size: 11.5px; }
+/* The balance is pushed to the right edge and set in the accent colour: it is the
+   number the row exists to say, and the actions follow it rather than the reverse. */
+.wb-acct-credits { margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+  min-width: 84px; justify-content: flex-end; }
+.wb-acct-credits .wb-credits-value { font-size: 15px; }
+.wb-acct-actions { display: inline-flex; align-items: center; gap: 6px; }
+.wb-acct-empty { padding: 10px 12px 4px; border-top: 1px solid var(--wb-line-soft);
+  font-size: 12.5px; color: var(--wb-muted); }
+.wb-pool-foot { display: flex; align-items: center; gap: 8px; padding: 8px 12px 10px;
+  border-top: 1px solid var(--wb-line-soft); }
 .wb-credits-value { font-size: 16.5px; font-weight: 650; color: var(--wb-accent-strong);
   font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
 /* A bare icon action: no box, just the glyph, tinted on hover. */
@@ -302,9 +314,8 @@ window.__ModuleLoader__.load({
   cursor: pointer; border: 1px solid var(--wb-line-soft); background: transparent; color: var(--wb-muted);
   white-space: nowrap; transition: background .15s, color .15s, border-color .15s; }
 .wb-link-btn:hover { background: var(--wb-accent-soft); color: var(--wb-accent-strong); border-color: transparent; }
-.wb-td .wb-btn { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;
-  padding: 4px 10px; font-size: 11.5px; min-width: 78px; min-height: 26px; white-space: nowrap; }
-.wb-td-span .wb-btn { padding: 7px 16px; }
+.wb-acct .wb-btn, .wb-pool-foot .wb-btn { display: inline-flex; align-items: center; justify-content: center;
+  box-sizing: border-box; padding: 4px 10px; font-size: 11.5px; min-height: 26px; white-space: nowrap; }
 
 /* tab strip: two equal halves, the selected one a tinted segment ------------- */
 .wb-tabs { display: flex; gap: 6px; padding: 8px 16px 0; border-bottom: 1px solid var(--wb-line-soft); }
@@ -752,7 +763,13 @@ window.__ModuleLoader__.load({
           displayName: region.label ?? region.provider,
           loggedIn: region.loggedIn === true,
           pending: region.pending === true,
+          // Already the sum over this deployment's accounts — the number the panel's
+          // head row shows, so a consumer and the panel never disagree about a balance.
           credits: typeof credits?.total === 'number' ? credits.total : null,
+          // How many accounts back this deployment, and how many of them can be called.
+          // A consumer offering "switch account" needs the count; nothing else here does.
+          accounts: (region.accounts ?? []).length,
+          accountsUsable: (region.accounts ?? []).filter((entry) => entry.loggedIn === true).length,
           models
         }
       }
@@ -915,9 +932,35 @@ window.__ModuleLoader__.load({
      * the real state arrived.
      */
     const PLACEHOLDER_REGIONS = [
-      { id: 'cn', provider: '@huai_xin/dsh-workbuddy/cn', endpoint: 'https://www.workbuddy.cn', loggedIn: false, pending: false, nickname: '', expiresAt: 0, refreshable: false, models: 0, credits: null, checkin: null, lastClaim: null },
-      { id: 'intl', provider: '@huai_xin/dsh-workbuddy/intl', endpoint: 'https://www.workbuddy.ai', loggedIn: false, pending: false, nickname: '', expiresAt: 0, refreshable: false, models: 0, credits: null, checkin: null, lastClaim: null }
+      { id: 'cn', provider: '@huai_xin/dsh-workbuddy/cn', endpoint: 'https://www.workbuddy.cn', loggedIn: false, pending: false, loginUrl: null, pendingSince: null, nickname: '', expiresAt: 0, refreshable: false, models: 0, credits: null, checkin: null, lastClaim: null },
+      { id: 'intl', provider: '@huai_xin/dsh-workbuddy/intl', endpoint: 'https://www.workbuddy.ai', loggedIn: false, pending: false, loginUrl: null, pendingSince: null, nickname: '', expiresAt: 0, refreshable: false, models: 0, credits: null, checkin: null, lastClaim: null }
     ]
+
+    /**
+     * The accounts a deployment block shows.
+     *
+     * A host that predates account pools answers with the deployment's own
+     * `nickname`/`expiresAt`/`credits` and no `accounts` array — the panel must still
+     * render one row for it rather than an empty block, so the single account is
+     * synthesized from the same fields the row would have read anyway.
+     */
+    function accountsOf(entry) {
+      if (Array.isArray(entry?.accounts)) return entry.accounts
+      if (entry === undefined) return []
+      if (entry.loggedIn !== true && entry.expiresAt === 0 && entry.nickname === '') return []
+      return [{
+        id: 'primary',
+        nickname: entry.nickname ?? '',
+        loggedIn: entry.loggedIn === true,
+        hasToken: entry.loggedIn === true,
+        expiresAt: entry.expiresAt ?? 0,
+        refreshable: entry.refreshable === true,
+        pending: entry.pending === true,
+        credits: entry.credits ?? null,
+        checkin: entry.checkin ?? null,
+        lastClaim: entry.lastClaim ?? null
+      }]
+    }
 
     function WorkBuddySettings({ t }) {
       const [state, setState] = React.useState(null)
@@ -1170,15 +1213,43 @@ window.__ModuleLoader__.load({
         }
       }
 
-      /** Re-read just one account's balance, leaving the rest of the panel alone. */
-      const refreshCredits = async (regionId) => {
-        setCreditBusy(regionId)
+      /**
+       * Re-read one account's balance (or a whole deployment's, when no account is named).
+       *
+       * A named account answers with that account's own balance; the deployment-level
+       * call answers with the same payload the panel already shows for the row, so it is
+       * simply merged back into the region entry.
+       */
+      const refreshCredits = async (regionId, account) => {
+        const key = account === undefined ? regionId : `${regionId}:${account}`
+        setCreditBusy(key)
         setError('')
         try {
-          const result = await request(`/credits?region=${encodeURIComponent(regionId)}`)
-          setState((current) => current === null ? current : {
-            ...current,
-            regions: current.regions.map((entry) => entry.id === regionId ? { ...entry, credits: result.credits ?? null } : entry)
+          const query = account === undefined ? '' : `&account=${encodeURIComponent(account)}`
+          const result = await request(`/credits?region=${encodeURIComponent(regionId)}${query}`)
+          setState((current) => {
+            if (current === null) return current
+            const regions = current.regions.map((entry) => {
+              if (entry.id !== regionId) return entry
+              if (account === undefined) {
+                return { ...entry, credits: result.credits ?? null }
+              }
+              const accounts = (entry.accounts ?? []).map((row) => row.id === account ? { ...row, credits: result.credits ?? null } : row)
+              // The sum shown on the head row has to follow a single account's refresh,
+              // otherwise the number the user just re-read disagrees with its own total.
+              let total = 0
+              let known = 0
+              let daily = 0
+              for (const row of accounts) {
+                if (row.credits?.ok !== true || typeof row.credits.total !== 'number') continue
+                total += row.credits.total
+                known += 1
+                if (typeof row.credits.daily === 'number') daily += row.credits.daily
+              }
+              const credits = known === 0 ? null : { supported: true, ok: true, total: Math.round(total * 100) / 100, daily: Math.round(daily * 100) / 100, accounts: known }
+              return { ...entry, accounts, credits }
+            })
+            return { ...current, regions }
           })
         } catch (cause) {
           setError(cause instanceof Error ? cause.message : String(cause))
@@ -1329,7 +1400,7 @@ window.__ModuleLoader__.load({
         role: 'switch',
         'aria-checked': model.enabled !== false,
         className: model.enabled === false ? 'wb-switch' : 'wb-switch wb-switch-on',
-        title: model.enabled === false ? t('enableModel') : t('disableModel'),
+        title: model.autoOff === true ? t('autoOffHint') : (model.enabled === false ? t('enableModel') : t('disableModel')),
         disabled: busy === `enabled:${regionId}`,
         onClick: (event) => {
           event.stopPropagation()
@@ -1473,6 +1544,12 @@ window.__ModuleLoader__.load({
                 title: busyTitle(model.busy, t)
               })
               : null,
+            // A model the probe switched off says so, and it says it in the compact rows too:
+            // those live in the unusable group, which is exactly where a suspension is, and
+            // the row is otherwise identical to one the user turned off by hand.
+            (model.autoOff === true)
+              ? tag(t('autoOff'), 'wb-tag-warn', { key: 'auto-off', title: t('autoOffHint') })
+              : null,
             h('span', { className: 'wb-model-rate', title: t('creditsRate') },
               model.credits === undefined
                 ? h('span', { className: 'wb-muted' }, t('unknown'))
@@ -1522,103 +1599,129 @@ window.__ModuleLoader__.load({
       )))
 
       /**
-       * The account table, transposed: deployments are the columns and the
-       * fields are the rows, so both accounts read side by side.
+       * One account line inside a deployment's block.
        *
-       * It is one CSS grid rather than a grid per row, which lets a signed-out
-       * deployment take its whole column with a single centred sign-in button
-       * instead of four rows of "未知" and disabled controls.
+       * Reads left to right as account · … · balance · actions: the balance sits at the
+       * right edge next to the controls, in the accent colour, because it is the number
+       * the row exists to say. Its own re-read and 续期 stay per account — the sum on the
+       * head row is only meaningful when each addend can be refreshed.
+       *
+       * No 更换账号: adding an account and signing the old one out replaces it, and the
+       * slot-named re-authorization was a second way to do the same thing. No expiry
+       * either — the value is the token's own claim and the server retires tokens well
+       * before it, so it read as a promise the deployment does not keep.
        */
-      const ACCOUNT_FIELDS = [t('colAccount'), t('colExpires'), t('colCredits'), t('colActions')]
-      const accountGrid = () => {
-        const cells = []
-        cells.push(h('span', { className: 'wb-row-label', key: 'head', style: { gridRow: 1, gridColumn: 1 } }, t('colDeploy')))
-        ACCOUNT_FIELDS.forEach((label, index) => cells.push(h('span', {
-          className: 'wb-row-label',
-          key: `label-${label}`,
-          style: { gridRow: index + 2, gridColumn: 1 }
-        }, label)))
+      const accountRow = (entry, regionId) => {
+        const key = `${regionId}:${entry.id}`
+        const creditsOk = entry.credits !== null && entry.credits !== undefined && entry.credits.ok === true
+        return h('div', { className: 'wb-acct', key },
+          h('span', { className: 'wb-acct-name', title: entry.id === 'primary' ? t('primaryAccountHint') : entry.id },
+            h('span', { className: 'wb-deploy-dot', style: { background: statusColor(entry).color } }),
+            entry.nickname.length > 0 ? entry.nickname : t('unknown')),
+          entry.loggedIn === false ? tag(t('statusLoggedOut'), 'wb-tag-warn') : null,
+          h('span', { className: 'wb-acct-credits', title: t('accountCredits') },
+            creditsOk
+              ? h('span', { className: 'wb-credits-value' }, formatCredits(entry.credits.total))
+              : h('span', { className: 'wb-muted' }, t('unknown'))),
+          h('span', { className: 'wb-acct-actions' },
+            h('button', {
+              key: 'refresh',
+              type: 'button',
+              className: 'wb-icon-btn',
+              title: t('refreshCredits'),
+              'aria-label': t('refreshCredits'),
+              disabled: creditBusy === key || entry.loggedIn !== true,
+              onClick: () => void refreshCredits(regionId, entry.id)
+            }, creditBusy === key ? '…' : '⟳'),
+            h('button', {
+              key: 'renew',
+              type: 'button',
+              className: 'wb-btn wb-btn-ghost',
+              title: t('renewAccountHint'),
+              disabled: busy === `refresh:${key}` || entry.loggedIn !== true,
+              onClick: () => void act(`refresh:${key}`, '/refresh', { region: regionId, account: entry.id }).then(load)
+            }, t('renewAccount')),
+            h('button', {
+              key: 'logout',
+              type: 'button',
+              className: 'wb-btn wb-btn-danger',
+              disabled: busy === `logout:${key}`,
+              onClick: () => void act(`logout:${key}`, '/logout', { region: regionId, account: entry.id }).then(load)
+            }, t('logout'))
+          )
+        )
+      }
 
-        regions.forEach((entry, index) => {
-          const column = index + 2
-          const status = statusLabel(entry)
-          cells.push(h('div', {
-            className: 'wb-th wb-deploy',
-            key: `head-${entry.id}`,
-            style: { gridRow: 1, gridColumn: column },
-            title: `${entry.provider} · ${entry.endpoint}`
-          },
-          h('span', { className: 'wb-deploy-dot', style: { background: status.token }, title: status.text }),
-          h('span', null, t(entry.id === 'cn' ? 'regionCn' : 'regionIntl')),
-          // The daily claim lives beside the deployment name: the balance row has
-          // to stay narrow (a top-up makes that number longer), and only one
-          // deployment has this action anyway.
-          checkinButton(entry)
-          ))
-
-          if (entry.loggedIn !== true) {
-            cells.push(h('div', {
-              className: 'wb-td wb-td-span',
-              key: `signin-${entry.id}`,
-              style: { gridRow: `2 / span ${ACCOUNT_FIELDS.length}`, gridColumn: column }
-            },
-            // Before the first answer arrives we do not know whether this account
-            // is signed in, so the cell says so instead of offering a sign-in
-            // button that may be pointless a moment later.
-            loading
-              ? h('span', { className: 'wb-loading' }, t('loading'))
-              : h('button', {
-                type: 'button',
-                className: 'wb-btn wb-btn-primary',
-                disabled: busy === `login:${entry.id}` || entry.pending,
-                onClick: () => void act(`login:${entry.id}`, '/login', { region: entry.id })
-              }, entry.pending ? t('loggingIn') : t('login'))
-            ))
-            return
-          }
-
-          const last = ACCOUNT_FIELDS.length - 1
-          const cell = (row, key, children, extra = '') => h('div', {
-            className: `wb-td${row === last ? ' wb-td-last' : ''}${extra.length === 0 ? '' : ` ${extra}`}`,
-            key: `${key}-${entry.id}`,
-            style: { gridRow: row + 2, gridColumn: column }
-          }, children)
-
-          cells.push(cell(0, 'account', h('span', { className: 'wb-account-name' },
-            entry.nickname.length > 0 ? entry.nickname : t('unknown'))))
-          cells.push(cell(1, 'expires', h('span', { className: 'wb-num' }, formatTime(entry.expiresAt, t('unknown')))))
-          cells.push(cell(2, 'credits', [
-            entry.credits !== null && entry.credits !== undefined && entry.credits.ok === true
-              ? h('span', { key: 'value', className: 'wb-credits-value' }, formatCredits(entry.credits.total))
-              : h('span', { key: 'value', className: 'wb-muted' }, t('unknown')),
-            // All values share a left edge; the quiet balance actions follow
-            // the figure directly so each deployment reads as one compact group.
-            h('span', { key: 'actions', className: 'wb-cell-actions' }, [
-              h('button', {
-                key: 'refresh',
-                type: 'button',
-                className: 'wb-icon-btn',
-                title: t('refreshCredits'),
-                'aria-label': t('refreshCredits'),
-                disabled: creditBusy === entry.id,
-                onClick: () => void refreshCredits(entry.id)
-              }, creditBusy === entry.id ? '…' : '⟳'),
-              // The official plans page needs the deployment's own signed-in
-              // session, so it opens in the user's browser rather than in here.
+      /**
+       * One deployment: a head with its own dot, name, summed balance and bulk actions,
+       * then its accounts, then 添加账号.
+       *
+       * The balance is the sum over the accounts below it — that is the number the row
+       * has always shown, and with several accounts it is the only one that answers "how
+       * much is left here".
+       */
+      const poolBlock = (entry) => {
+        const status = statusLabel(entry)
+        const accounts = accountsOf(entry)
+        const credits = entry.credits
+        return h('div', { className: 'wb-pool-block', key: entry.id },
+          h('div', { className: 'wb-pool-head' },
+            h('span', { className: 'wb-pool-name', title: `${entry.provider} · ${entry.endpoint}` },
+              h('span', { className: 'wb-deploy-dot', style: { background: status.token }, title: status.text }),
+              t(entry.id === 'cn' ? 'regionCn' : 'regionIntl')),
+            // No account count: the rows below already say how many there are, and a
+            // number that duplicates what is on screen is one more thing to read.
+            // The label leads the figure here ("总积分 1234.50") because this number is a
+            // total, while the per-account rows show a bare figure beside their name.
+            h('span', { className: 'wb-pool-credits' },
+              h('span', { className: 'wb-acct-meta' }, t('totalCredits')),
+              credits !== null && credits !== undefined && credits.ok === true
+                ? h('span', { className: 'wb-credits-value', title: t('totalCreditsHint') }, formatCredits(credits.total))
+                : h('span', { className: 'wb-muted' }, t('unknown'))),
+            h('span', { className: 'wb-pool-actions' },
+              checkinButton(entry),
               h('button', {
                 key: 'plans',
                 type: 'button',
                 className: 'wb-link-btn',
                 title: t('openPlansHint'),
                 onClick: () => void openPlans(entry.id)
-              }, t('openPlans'))
-            ])
-          ], 'wb-td-credits'))
-          cells.push(cell(3, 'actions', accountActions(entry)))
-        })
-        return cells
+              }, t('openPlans')),
+              h('button', {
+                key: 'refresh-region',
+                type: 'button',
+                className: 'wb-icon-btn',
+                title: t('refreshCredits'),
+                'aria-label': t('refreshCredits'),
+                disabled: creditBusy === entry.id || entry.loggedIn !== true,
+                onClick: () => void refreshCredits(entry.id)
+              }, creditBusy === entry.id ? '…' : '⟳')
+            )
+          ),
+          accounts.length === 0
+            ? h('div', { className: 'wb-acct-empty' }, loading ? t('loading') : t('noAccounts'))
+            : accounts.map((account) => accountRow(account, entry.id)),
+          h('div', { className: 'wb-pool-foot' },
+            h('button', {
+              key: 'add',
+              type: 'button',
+              className: 'wb-btn wb-btn-primary',
+              disabled: busy === `login:${entry.id}:add`,
+              title: t('addAccountHint'),
+              onClick: () => void act(`login:${entry.id}:add`, '/login', { region: entry.id, add: true })
+            }, t('addAccount')),
+            entry.pending === true ? h('span', { className: 'wb-loading' }, t('loggingIn')) : null
+          )
+        )
       }
 
+      /**
+       * The daily claim, once per deployment.
+       *
+       * Only the mainland deployment ships the endpoint, so the button exists there
+       * alone. With several accounts it claims for the one the deployment is currently
+       * using — a check-in credits one account, and the row already shows the sum.
+       */
       const checkinButton = (entry) => {
         const rowCheckin = entry.checkin
         if (rowCheckin?.supported !== true || rowCheckin.ok !== true) return null
@@ -1627,34 +1730,18 @@ window.__ModuleLoader__.load({
           (entry.lastClaim.claimed === true || entry.lastClaim.already === true)
         const checkedIn = rowCheckin.todayCheckedIn === true || claimedToday
         return h('button', {
+          key: 'checkin',
           type: 'button',
           className: 'wb-btn',
           disabled: busy === `checkin:${entry.id}` || !entry.loggedIn || checkedIn || !rowCheckin.active,
           // The automatic claim is the normal path, so its outcome lives in the
-          // tooltip rather than in a table row of its own.
+          // tooltip rather than in a row of its own.
           title: entry.lastClaim?.claimed === true
             ? t('lastClaim')(formatTime(entry.lastClaim.at, t('unknown')), t('claimResult')(entry.lastClaim.credit ?? 0))
             : undefined,
           onClick: () => void act(`checkin:${entry.id}`, '/checkin', { region: entry.id })
         }, busy === `checkin:${entry.id}` ? t('claiming') : (checkedIn ? t('checkedIn') : t('claim')))
       }
-
-      const accountActions = (entry) => [
-        h('button', {
-          key: 'login',
-          type: 'button',
-          className: 'wb-btn wb-btn-primary',
-          disabled: busy === `login:${entry.id}` || entry.pending,
-          onClick: () => void act(`login:${entry.id}`, '/login', { region: entry.id })
-        }, entry.pending ? t('loggingIn') : (entry.loggedIn ? t('switchAccount') : t('login'))),
-        h('button', {
-          key: 'logout',
-          type: 'button',
-          className: 'wb-btn wb-btn-danger',
-          disabled: busy === `logout:${entry.id}` || (!entry.loggedIn && entry.expiresAt === 0),
-          onClick: () => void act(`logout:${entry.id}`, '/logout', { region: entry.id })
-        }, t('logout'))
-      ]
 
       /**
        * Renew both deployments from one button in the card corner: the tokens are
@@ -1681,13 +1768,24 @@ window.__ModuleLoader__.load({
       const loginCallout = () => {
         const pendingRegion = regions.find((entry) => loginUrls[entry.id] !== undefined || entry.pending)
         if (pendingRegion === undefined) return null
-        const pendingUrl = loginUrls[pendingRegion.id]
+        // The host is the one that knows the link: it minted it and it is still polling for the
+        // token. The panel only knows it when it happened to see the reply, so a reload would
+        // otherwise leave this notice with no link and no way out.
+        const pendingUrl = loginUrls[pendingRegion.id] ?? pendingRegion.loginUrl ?? undefined
         return h('div', { className: 'wb-callout' },
           t('loginHint'),
           pendingUrl === undefined ? null : h('div', { className: 'wb-callout-row' },
             h('code', null, pendingUrl),
             h('button', { type: 'button', className: 'wb-btn', onClick: () => void copy(pendingRegion.id, pendingUrl) },
               copied === pendingRegion.id ? t('copied') : t('copy'))
+          ),
+          h('div', { className: 'wb-callout-row' },
+            h('button', {
+              type: 'button',
+              className: 'wb-btn wb-btn-ghost',
+              disabled: busy === `login-cancel:${pendingRegion.id}`,
+              onClick: () => void act(`login-cancel:${pendingRegion.id}`, '/login/cancel', { region: pendingRegion.id })
+            }, t('cancelLogin'))
           )
         )
       }
@@ -1716,13 +1814,7 @@ window.__ModuleLoader__.load({
               }, busy === 'renew:all' ? t('renewing') : t('renewBoth'))
             )
           ),
-          h('div', {
-            // A single separator stays at the card's centre when there are
-            // exactly two deployments.
-            className: regions.length === 2 ? 'wb-table wb-table-split' : 'wb-table',
-            role: 'table',
-            style: { '--wb-cols': String(Math.max(1, regions.length)) }
-          }, accountGrid()),
+          h('div', { className: 'wb-pool' }, regions.map((entry) => poolBlock(entry))),
           loginCallout()
         ),
 
@@ -1741,7 +1833,12 @@ window.__ModuleLoader__.load({
             },
             h('span', { className: 'wb-tab-dot', style: statusColor(entry) }),
             t(entry.id === 'cn' ? 'regionCn' : 'regionIntl'),
-            entry.loggedIn && entry.nickname.length > 0 ? h('span', { className: 'wb-tab-sub' }, entry.nickname) : null
+            // The tab names a DEPLOYMENT, and the list under it belongs to all of its accounts
+            // (a model is offered when any one of them can use it). Naming the first account
+            // there read as "these are that account's models", so the subtitle counts them.
+            accountsOf(entry).length > 0
+              ? h('span', { className: 'wb-tab-sub' }, t('accountCount')(accountsOf(entry).length))
+              : null
             ))
           ),
           // Two rows: what this list is, then the tools that act on it. Every

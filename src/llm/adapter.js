@@ -19,12 +19,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { hasUsableToolName, normalizeToolArguments, toWireMessages } from './wire.js'
-import { accountIdOf, freshToken, refreshRegion } from '../account/auth.js'
-import { readAvailability, writeAvailability } from '../catalog/availability.js'
+import { accountOf, freshToken, prefsFor, refreshRegion, usableSlot } from '../account/auth.js'
+import { PRIMARY_ACCOUNT, accountSlots, listAccounts, slotFor } from '../account/pool.js'
+import { aggregateAvailability, syncAutoOff, writeAvailability } from '../catalog/availability.js'
 import { fetchModelEntries } from '../catalog/catalog.js'
 import { readCatalogCache, writeCatalogCache } from '../catalog/catalog-cache.js'
-import { readPrefs, isEnabled } from '../catalog/model-prefs.js'
-import { applyOfficialList, readOfficialList } from '../catalog/official-list.js'
+import { isEnabled } from '../catalog/model-prefs.js'
+import { applyOfficialList, mergedOfficialList } from '../catalog/official-list.js'
 import { classifyEnding } from './endings.js'
 import { RECOVERY_ROUNDS, continuationMessages, mergeUsage, shiftChunk } from './recovery.js'
 import { chatRoutes } from '../core/regions.js'
@@ -183,6 +184,25 @@ function queueNotice(body) {
  *   a stated time. Same argument: waiting out five retries cannot cross that window, so
  *   `RATE_WINDOW_EXCEEDED`, shown verbatim and not retried.
  */
+/**
+ * Refusals that follow the *account*, not the request.
+ *
+ * These are the cases where a second signed-in account is a real answer: the balance is
+ * empty (`QUOTA`), the account's rate window is used up (`RATE_WINDOW_EXCEEDED`), the
+ * account is being throttled (`RATE_LIMIT`), or its credential is rejected (`AUTH`).
+ * Everything else — a delisted model, a refused request shape, a 5xx — would fail the
+ * same way on the next account, so trying it only delays the honest answer.
+ */
+const FAILS_OVER = new Set(['QUOTA', 'RATE_WINDOW_EXCEEDED', 'RATE_LIMIT', 'AUTH'])
+
+/** How each of those reads in the fallback log. */
+const FAIL_OVER_REASON = {
+  QUOTA: '积分不足',
+  RATE_WINDOW_EXCEEDED: '限额已用完',
+  RATE_LIMIT: '被限流',
+  AUTH: '凭据失效'
+}
+
 function requestFailure(provider, status, body) {
   const queue = queueNotice(body)
   if (queue !== undefined) {
@@ -275,6 +295,13 @@ export class WorkBuddyAdapter {
     this.catalogSource = 'none'
     /** When the on-disk cache behind `source === 'cache'` was written. */
     this.catalogCachedAt = undefined
+    /**
+     * The account that last answered, asked first next time.
+     *
+     * Kept in memory only: after a restart the pool's own order decides again, which is
+     * what the panel shows, so a stale preference can never outlive the app.
+     */
+    this.lastGoodAccount = undefined
   }
 
   providerInfo(provider) {
@@ -320,7 +347,7 @@ export class WorkBuddyAdapter {
   async models() {
     // Remember which account these verdicts belong to: the ledger and the imported
     // list are per-account, the catalog itself is shared.
-    this.accountId = await accountIdOf(this.ctx, this.region)
+    this.accountId = accountOf(usableSlot(this.region))
     const fresh = this.catalog !== undefined && Date.now() - this.catalogAt < CATALOG_TTL_MS
     if (fresh) return this.catalog
     let loaded
@@ -330,8 +357,11 @@ export class WorkBuddyAdapter {
       loaded = { entries: [], source: 'none', reasons: [String(error?.message ?? error)] }
     }
     // An imported account list wins over whatever the sources claim: it is the
-    // one thing that reflects what this account may actually pick.
-    const imported = readOfficialList(this.region.id, this.accountId)
+    // one thing that reflects what an account may actually pick. Every account of the
+    // pool contributes, because the list is what the picker offers for the deployment:
+    // a model only one of the two accounts may call is still callable, and the request
+    // is routed to that account.
+    const imported = mergedOfficialList(this.region.id, listAccounts(this.region).map((entry) => entry.id))
     if (loaded.entries.length > 0) {
       const applied = applyOfficialList(loaded.entries, imported)
       // A model the live read dropped but the cache still holds is not forgotten
@@ -402,9 +432,12 @@ export class WorkBuddyAdapter {
   /**
    * The verdicts the availability ledger holds for this deployment, keyed by
    * model id. The panel groups by these; the snapshot reports them as tokens.
+   *
+   * Aggregated across the pool: a model is usable when *any* account can call it, so one
+   * account's `denied` mark never hides a model its sibling is allowed to use.
    */
   availability() {
-    return readAvailability(this.region.id, this.accountId).models
+    return aggregateAvailability(this.region.id, listAccounts(this.region).map((entry) => entry.id)).models
   }
 
   /**
@@ -412,25 +445,39 @@ export class WorkBuddyAdapter {
    *
    * Learned from real turns rather than a sweep: `11102` means the id is gone,
    * `11158` means this account may not use the model. Neither costs anything
-   * extra — the user already spent that request. The recorded verdict does not
-   * switch anything on or off any more; it only changes what the panel shows
-   * and what the state service reports.
+   * extra — the user already spent that request. The verdict also suspends the model in the
+   * picker while it stands, which is the user's stated rule: unusable means out of the way,
+   * and the switch they set comes back unchanged when the model answers again.
    */
-  rememberUnusable(model, code, detail) {
+  rememberUnusable(model, code, detail, account) {
+    // The verdict belongs to the account that produced it. Recording it against the
+    // deployment would let one account's refusal hide a model another account can call,
+    // which is now the normal case rather than an edge.
+    const owner = account ?? this.accountId
     const text = String(detail)
     if (/11102|service info not found/i.test(text)) {
-      writeAvailability(this.region.id, [{ id: model, state: 'dead', detail: '模型不存在（11102 service info not found）', at: Date.now() }], this.accountId)
-      this.invalidateCatalog()
-      // The verdict changes what the panel groups, so the picker has to re-read.
-      notifyModelTopology(this.ctx)
+      this.recordVerdict(model, 'dead', '模型不存在（11102 service info not found）', owner)
       return
     }
     if (/11158|is not allowed for user type/i.test(text)) {
       const type = /user type \[([^\]]{0,40})\]/i.exec(text)?.[1] ?? ''
-      writeAvailability(this.region.id, [{ id: model, state: 'denied', detail: `账号无权限（11158${type.length > 0 ? `，用户类型 ${type}` : ''}）`, at: Date.now() }], this.accountId)
-      this.invalidateCatalog()
-      notifyModelTopology(this.ctx)
+      this.recordVerdict(model, 'denied', `账号无权限（11158${type.length > 0 ? `，用户类型 ${type}` : ''}）`, owner)
     }
+  }
+
+  /**
+   * Write one learned verdict and let everything that depends on it follow.
+   *
+   * Three things react: the catalog is what the panel groups, the suspension is what the
+   * picker is allowed to offer, and `notifyModelTopology` is what makes the client re-read
+   * either of them. Doing one without the others leaves the panel describing a model that
+   * no longer answers.
+   */
+  recordVerdict(model, state, detail, owner) {
+    writeAvailability(this.region.id, [{ id: model, state, detail, at: Date.now() }], owner)
+    syncAutoOff(this.region.id, listAccounts(this.region).map((entry) => entry.id))
+    this.invalidateCatalog()
+    notifyModelTopology(this.ctx)
   }
 
   async entryOf(model) {
@@ -507,9 +554,10 @@ export class WorkBuddyAdapter {
 
   async listModels(provider) {
     const catalog = await this.models()
-    // What the picker offers: only what the user switched on (see `model-prefs.js`). A model
-    // nobody touched is absent, whatever its verdict says.
-    const prefs = readPrefs(this.region.id)
+    // What the picker offers: only what the user switched on and nothing the sweep has
+    // suspended (see `model-prefs.js`). A model nobody touched is absent, whatever its
+    // verdict says.
+    const prefs = prefsFor(this.region)
     const offered = catalog.filter((entry) => isEnabled(prefs, entry.id))
     // Always logged: one line per picker open, and the fastest way to answer
     // "did the picker re-read the list after that switch was flipped?".
@@ -793,36 +841,59 @@ export class WorkBuddyAdapter {
   }
 
   /**
-   * One wire round: the request, the fallbacks, and the SSE stream.
+   * The account this adapter currently calls through.
    *
-   * Yields the harness chunks with block indices shifted by `offset` (continuations
-   * append new blocks) and returns a summary instead of yielding `usage`/`finish`.
+   * The pool is ordered and the order is also the fallback order, so the first account
+   * that answers is remembered and asked first next time: a user with two accounts
+   * expects the one that works to stay the one being used, not to alternate.
    */
-  async *streamRound(options, offset) {
-    const model = options.model
-    const entry = await this.entryOf(model)
-    let token = await freshToken(this.ctx, this.region)
-    if (token.length === 0) {
-      throw llmError(`${this.region.provider}: 未登录，请先运行 /workbuddy login ${this.region.id}`, 'MISSING_CREDENTIAL')
-    }
-    const imageUrls = await this.resolveImages(options.messages)
-    const payload = () => JSON.stringify(this.buildBody(options, model, entry, imageUrls))
-    // The message being answered, hashed so every retry of the same step carries the
-    // same id (the official client uses the message's own id here).
-    const messageId = this.messageIdFor(options)
+  activeSlot() {
+    return slotFor(this.region, this.lastGoodAccount ?? PRIMARY_ACCOUNT)
+  }
+
+  /**
+   * Every account to try, in the order the panel lists them.
+   *
+   * The panel's order *is* the fallback order — that is the contract the user asked for,
+   * so nothing (not even "the one that worked last time") is allowed to reorder it. The
+   * list comes from this adapter's own `region`, so it can only ever contain accounts of
+   * one deployment: a mainland request must never land on an overseas account.
+   */
+  accountOrder() {
+    return accountSlots(this.region)
+  }
+
+  /**
+   * Send one request, moving to the next account when this one cannot answer.
+   *
+   * Four failures follow the *account* rather than the request — an exhausted balance, a
+   * used-up rate window, a throttled model and a rejected credential — and are exactly
+   * what a second signed-in account fixes, so they switch accounts instead of failing the
+   * step. Everything else (a delisted model, a refused request shape, an upstream 5xx)
+   * would fail identically on the next account and is thrown at once.
+   *
+   * The attempt happens per request, not once per session: a quota that runs out midway
+   * through a conversation must move the very next turn to the next account.
+   */
+  async sendAcrossAccounts(payload, options, model, messageId) {
     const routes = this.routes()
-    let route = routes[0]
+    let lastFailure
+    let sawToken = false
+    for (const slot of this.accountOrder()) {
+      const account = accountOf(slot)
+      let token = await freshToken(this.ctx, slot)
+      if (token.length === 0) continue
+      sawToken = true
+      let route = routes[0]
+      let response = await this.send(token, payload(), options.signal, route, model, messageId)
+      let rejection = response.ok ? '' : await response.text().catch(() => '')
 
-    let response = await this.send(token, payload(), options.signal, route, model, messageId)
-    let rejection = ''
-    if (!response.ok) {
-      rejection = await response.text().catch(() => '')
-
-      if (isUnapprovedChannel(rejection)) {
+      if (!response.ok && isUnapprovedChannel(rejection)) {
         // The gateway no longer associates this conversation identity with an
         // approved client. A fresh identity is the one input we control, so
         // retry once with it; if that still fails, fall back to the other
-        // China route, whose channel is approved by construction.
+        // China route, whose channel is approved by construction. Neither is an
+        // account problem, so this never costs a fallback slot.
         dumpRejectedRequest(this.region, model, route, payload(), rejection)
         this.rotateIdentity()
         this.ctx.logger.warn(`[workbuddy] ${this.region.id}: 网关判为未获批渠道，已换会话标识重试一次`)
@@ -834,22 +905,65 @@ export class WorkBuddyAdapter {
           response = await this.send(token, payload(), options.signal, route, model, messageId)
           rejection = response.ok ? '' : await response.text().catch(() => '')
         }
-      } else if (response.status === 401 || response.status === 403) {
-        const rotated = await refreshRegion(this.ctx, this.region, { force: true })
+      } else if (!response.ok && (response.status === 401 || response.status === 403)) {
+        const rotated = await refreshRegion(this.ctx, slot, { force: true })
         if (rotated.refreshed) {
-          token = await freshToken(this.ctx, this.region)
+          token = await freshToken(this.ctx, slot)
           if (token.length > 0) {
             response = await this.send(token, payload(), options.signal, route, model, messageId)
             rejection = response.ok ? '' : await response.text().catch(() => '')
           }
         }
       }
-    }
-    if (!response.ok) {
+
+      if (response.ok) {
+        if (this.lastGoodAccount !== account) {
+          this.lastGoodAccount = account
+          if (account !== PRIMARY_ACCOUNT) {
+            this.ctx.logger.info(`[workbuddy] ${this.region.id}: 本次请求由账号 ${account} 承接`)
+          }
+        }
+        return { response, slot }
+      }
+
       const failure = requestFailure(this.region.provider, response.status, rejection)
-      this.rememberUnusable(model, failure.code, errorDetail(rejection))
-      throw failure
+      lastFailure = failure
+      if (!FAILS_OVER.has(failure.code)) {
+        // Not something another account can fix: a delisted model stays delisted, and a
+        // refused request shape is refused for everyone.
+        this.rememberUnusable(model, failure.code, errorDetail(rejection), accountOf(slot))
+        throw failure
+      }
+      this.ctx.logger.warn(`[workbuddy] ${this.region.id}: 账号 ${account} ${FAIL_OVER_REASON[failure.code] ?? failure.code}，改试下一个账号`)
     }
+
+    if (lastFailure !== undefined) {
+      // Every account was tried. The last refusal is what the user sees, and it is still a
+      // real verdict about the model, so it is recorded as before.
+      this.rememberUnusable(model, lastFailure.code, String(lastFailure.message), accountOf(this.activeSlot()))
+      throw lastFailure
+    }
+    if (!sawToken) {
+      throw llmError(`${this.region.provider}: 未登录，请先运行 /workbuddy login ${this.region.id}`, 'MISSING_CREDENTIAL')
+    }
+    throw llmError(`${this.region.provider}: 没有可用的账号（凭据均已失效）`, 'AUTH')
+  }
+
+  /**
+   * One wire round: the request, the fallbacks, and the SSE stream.
+   *
+   * Yields the harness chunks with block indices shifted by `offset` (continuations
+   * append new blocks) and returns a summary instead of yielding `usage`/`finish`.
+   */
+  async *streamRound(options, offset) {
+    const model = options.model
+    const entry = await this.entryOf(model)
+    const imageUrls = await this.resolveImages(options.messages)
+    const payload = () => JSON.stringify(this.buildBody(options, model, entry, imageUrls))
+    // The message being answered, hashed so every retry of the same step carries the
+    // same id (the official client uses the message's own id here).
+    const messageId = this.messageIdFor(options)
+    const { response } = await this.sendAcrossAccounts(payload, options, model, messageId)
     // Collect what the continuation logic needs, forward the chunks, and report the
     // ending as a value instead of yielding it.
     const summary = {

@@ -8,10 +8,21 @@
  */
 
 import assert from 'node:assert/strict'
+import { rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+// Point $DSH_HOME at a throwaway directory BEFORE anything touches a credential file. This
+// file seeds `REGIONS.<id>.tokenRef`, and those very refs hold the real tokens of whoever
+// runs the suite: without this, `npm test` on a developer machine writes a fixture token
+// over the account it was meant to leave alone.
+process.env.DSH_HOME = join(tmpdir(), 'dsh-workbuddy-catalog-test')
+rmSync(process.env.DSH_HOME, { recursive: true, force: true })
+
 import { fetchModelEntries, mergeEntries as mergeForTest, parseModelsFromConfig } from '../../src/catalog/catalog.js'
 import { REGIONS } from '../../src/core/regions.js'
 
-// The plugin keeps its own credentials document now (src/paths.js), so the fixture seeds
+// The plugin keeps its own credentials document now (src/core/paths.js), so the fixture seeds
 // that instead of a fake credentials service.
 const { setCredential } = await import('../../src/core/paths.js')
 setCredential(REGIONS.intl.tokenRef, 'header.payload.signature')
