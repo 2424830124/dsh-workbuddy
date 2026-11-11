@@ -8,25 +8,21 @@
  * Run: `node test/live/cn-fingerprint-count.mjs [model]`
  */
 
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 
 import { WorkBuddyAdapter } from '../../src/llm/adapter.js'
 import { readToken } from '../../src/account/auth.js'
 import { REGIONS } from '../../src/core/regions.js'
+import { resolveCredential } from '../../src/core/paths.js'
 
-const home = process.env.DSH_HOME ?? `${homedir()}/.dsh`
 const region = REGIONS.cn
 const model = process.argv[2] ?? 'deepseek-v4.1-flash'
 
+// Credentials come from the plugin's own document, exactly as the host reads them: the
+// probe has to exercise the same path the plugin does, or it tests a document neither
+// side writes any more.
 const ctx = {
   logger: { info: () => {}, warn: () => {}, error: () => {} },
-  credentials: {
-    resolve: async (ref) => {
-      const match = new RegExp(`^[ \t]*${ref}:[ \t]*(.+)$`, 'm').exec(readFileSync(`${home}/.credentials.yaml`, 'utf8'))
-      return match === null ? undefined : { value: match[1].trim().replace(/^["']|["']$/g, '') }
-    }
-  },
+  credentials: { resolve: async (ref) => resolveCredential(ref) },
   get: () => undefined
 }
 const token = await readToken(ctx, region)

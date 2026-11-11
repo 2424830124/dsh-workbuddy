@@ -185,7 +185,7 @@ export function apply(ctx) {
     definitionId: 'dsh-workbuddy',
     name: 'workbuddy',
     description: '登录 WorkBuddy（海外版/大陆版）并管理其模型路由',
-    input: { hint: '[login|logout|status|models|refresh] [intl|cn|all]' },
+    input: { hint: '[login|logout|status|models|check|refresh] [intl|cn|all]' },
     handler: (invocation) => executeCommand(ctx, adapters, invocation)
   })
 

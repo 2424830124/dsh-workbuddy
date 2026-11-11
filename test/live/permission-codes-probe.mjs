@@ -10,17 +10,9 @@
  * Run: `node test/live/permission-codes-probe.mjs`
  */
 
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-
 import { REGIONS, chatRoutes } from '../../src/core/regions.js'
 
-const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
-const text = readFileSync(credentialsPath, 'utf8')
-const tokenOf = (name) => {
-  const match = new RegExp(`^[ \\t]*${name}:[ \\t]*(.+)$`, 'm').exec(text)
-  return match === null ? '' : match[1].trim().replace(/^["']|["']$/g, '')
-}
+import { tokenOf } from './credentials.mjs'
 const cnToken = tokenOf('WORKBUDDY_CN_TOKEN')
 const intlToken = tokenOf('WORKBUDDY_INTL_TOKEN')
 const tampered = `${intlToken.slice(0, -4)}AAAA`

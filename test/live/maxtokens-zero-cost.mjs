@@ -1,21 +1,15 @@
 /** Does `max_tokens: 0` actually start a completion (and cost tokens)? */
-import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
 import { readToken } from '../../src/account/auth.js'
 import { REGIONS, chatRoutes } from '../../src/core/regions.js'
+import { credentialService } from './credentials.mjs'
 
-const home = process.env.DSH_HOME ?? `${homedir()}/.dsh`
 const region = REGIONS.cn
 
 const ctx = {
   logger: { info: () => {}, warn: () => {}, error: () => {} },
-  credentials: {
-    resolve: async (ref) => {
-      const match = new RegExp(`^[ \t]*${ref}:[ \t]*(.+)$`, 'm').exec(readFileSync(`${home}/.credentials.yaml`, 'utf8'))
-      return match === null ? undefined : { value: match[1].trim().replace(/^["']|["']$/g, '') }
-    }
-  }
+  credentials: credentialService
 }
 const token = await readToken(ctx, region)
 const route = chatRoutes(region)[0]

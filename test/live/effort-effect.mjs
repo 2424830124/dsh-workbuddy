@@ -16,10 +16,9 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 
 import { readToken } from '../../src/account/auth.js'
+import { credentialService } from './credentials.mjs'
 import { fetchModelEntries } from '../../src/catalog/catalog.js'
 import { chatRoutes, REGIONS } from '../../src/core/regions.js'
 
@@ -30,11 +29,7 @@ const requested = process.argv.slice(4)
 const ctx = {
   logger: { info: () => {}, warn: (...args) => console.warn('[warn]', ...args), error: console.error },
   credentials: {
-    resolve: async (ref) => {
-      const home = process.env.DSH_HOME ?? `${homedir()}/.dsh`
-      const match = new RegExp(`^[ \t]*${ref}:[ \t]*(.+)$`, 'm').exec(readFileSync(`${home}/.credentials.yaml`, 'utf8'))
-      return match === null ? undefined : { value: match[1].trim().replace(/^["']|["']$/g, '') }
-    }
+    resolve: (ref) => credentialService.resolve(ref)
   }
 }
 

@@ -369,11 +369,10 @@ assert.ok(titlesOf(signedInTree).some((title) => title.startsWith('繁忙程度�
   assert.equal(cn.loggedIn, true)
   assert.equal(typeof cn.credits, 'number', 'the balance travels with the snapshot')
   // A deployment can hold several accounts; the published snapshot says how many there
-  // are and how many can actually be called, so a consumer offering "switch account"
-  // does not have to guess. The fixture answers the single-account shape, so both read 0
-  // here — the point is that the fields exist and are numbers, not that they are large.
+  // are, so a consumer offering "switch account" does not have to guess. The fixture
+  // answers the single-account shape, so it reads 0 — the point is that the field exists
+  // and is a number, not that it is large.
   assert.equal(typeof cn.accounts, 'number')
-  assert.equal(typeof cn.accountsUsable, 'number')
 
   // Four fields per model. Keys and values are both English, and the values are fixed tokens
   // rather than dictionary lookups: the same model must report `rate limited` in a Chinese UI
@@ -720,4 +719,32 @@ assert.ok(textsOf(failedTree).some((text) => text.includes('offline')), 'a faile
   assert.ok(pendingText.includes('取消这次登录'), 'and the waiting login can be abandoned')
 }
 
-console.log('client.mjs: OK — registration, dictionaries, four full panel renders, account counts, same-name ordering, waiting-login callout, and token units verified')
+// 8) 续期 writes to the host directly, not through `act()` — so it has to refresh the
+// published snapshot itself. Without that the panel showed renewed tokens while a selector
+// kept reading the old snapshot until the five-minute timer happened to fire.
+{
+  const renewState = { ...signedInState }
+  installFetch({ state: renewState, models, busy: {} })
+  const tree = await renderPanel()
+  const service = provided.get('@huai_xin/dsh-workbuddy/state')
+  await service.refresh()
+
+  const before = service.getSnapshot()
+  // The bulk-renew button lives in the account card's head row; its label is 续期 and the
+  // per-account rows carry one too, so pick the one outside a row.
+  const renewButton = nodesOf(tree).find((node) => node.type === 'button'
+    && textsOf(node).join('').includes('续期')
+    && !nodesOf(node).some((child) => hasClass(child, 'wb-acct')))
+  assert.ok(renewButton !== undefined, 'the account card offers a bulk renew')
+  assert.equal(typeof renewButton.props.onClick, 'function')
+
+  const calls = installFetch({ state: renewState, models, busy: {} })
+  renewButton.props.onClick()
+  // The handler awaits `/refresh` then `load()`, and only then refreshes the snapshot.
+  for (let pass = 0; pass < 12; pass += 1) await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.ok(calls.some((path) => path.includes('/refresh')), 'the button asks the host to renew')
+  assert.ok(calls.filter((path) => path.includes('/state')).length >= 2, 'and re-reads the snapshot afterwards, not only the panel')
+  assert.notEqual(service.getSnapshot(), before, 'a selector sees the renewal instead of waiting for the timer')
+}
+
+console.log('client.mjs: OK — registration, dictionaries, five full panel renders, account counts, same-name ordering, waiting-login callout, snapshot refresh after a manual renewal, and token units verified')

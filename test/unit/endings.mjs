@@ -8,7 +8,7 @@
  */
 import assert from 'node:assert/strict'
 
-const { classifyEnding, isToolCallReason } = await import('../../src/llm/endings.js')
+const { classifyEnding } = await import('../../src/llm/endings.js')
 
 const PROVIDER = '@huai_xin/dsh-workbuddy/intl'
 const base = { streamEnded: true, finishReason: 'stop', argsTruncated: false, orphanCalls: 0, blockCount: 1, hasTools: false }
@@ -75,10 +75,4 @@ assert.equal(classify({ argsTruncated: true, finishReason: 'refusal' }).kind, 'm
 assert.ok(classify({ finishReason: 'refusal' }).failure.message.startsWith(`${PROVIDER}: `))
 assert.ok(classify({ blockCount: 0 }).failure.message.startsWith('模型返回了空响应'), 'the empty message is ours, no provider needed')
 
-// --- sentence helpers -----------------------------------------------------
-assert.equal(isToolCallReason('tool_calls'), true)
-assert.equal(isToolCallReason('tool_use'), true)
-assert.equal(isToolCallReason('stop'), false)
-assert.equal(isToolCallReason(undefined), false)
-
-console.log('endings.mjs: OK — the full ending table, its precedence, and the tool-call spellings verified')
+console.log('endings.mjs: OK — the full ending table and its precedence verified')

@@ -11,25 +11,16 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 
 import { readToken } from '../../src/account/auth.js'
 import { REGIONS } from '../../src/core/regions.js'
+import { credentialService } from './credentials.mjs'
 
 const region = REGIONS[process.argv[2] ?? 'cn']
 
-const home = process.env.DSH_HOME ?? `${homedir()}/.dsh`
-const readTokenFromHome = async (ref) => {
-  const path = `${home}/.credentials.yaml`
-  const match = new RegExp(`^[ \t]*${ref}:[ \t]*(.+)$`, 'm').exec(readFileSync(path, 'utf8'))
-  return match === null ? undefined : match[1].trim().replace(/^["']|["']$/g, '')
-}
 const ctx = {
   logger: { info: () => {}, warn: console.warn, error: console.error },
-  credentials: { resolve: async (ref) => {
-    const value = await readTokenFromHome(ref)
-    return value === undefined ? undefined : { value }
-  } }
+  credentials: credentialService
 }
 
 const token = await readToken(ctx, region)
@@ -71,7 +62,7 @@ for (const record of records) {
   live.set(record.id, previous === undefined ? { ...record } : { ...previous, ...record })
 }
 
-const cachePath = `${home}/cache/dsh-workbuddy/catalog-${region.id}.json`
+const cachePath = `${home}/dsh-workbuddy/catalog-${region.id}.json`
 let cached = []
 try { cached = JSON.parse(readFileSync(cachePath, 'utf8')).entries ?? [] } catch { /* no cache yet */ }
 

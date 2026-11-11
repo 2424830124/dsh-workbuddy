@@ -5,24 +5,13 @@
  * Run: `node test/live/picker-contract-check.mjs`
  */
 
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-
 import { WorkBuddyAdapter } from '../../src/llm/adapter.js'
 import { REGIONS } from '../../src/core/regions.js'
-
-const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
-const yaml = readFileSync(credentialsPath, 'utf8')
+import { credentialService } from './credentials.mjs'
 
 const ctx = {
   logger: { info: () => {}, warn: () => {}, error: () => {} },
-  credentials: {
-    resolve: async (ref) => {
-      const match = new RegExp(`^[ \\t]*${ref}:[ \\t]*(.+)$`, 'm').exec(yaml)
-      return match === null ? undefined : { value: match[1].trim().replace(/^["']|["']$/g, '') }
-    },
-    set: async () => {}
-  },
+  credentials: credentialService,
   get: () => undefined
 }
 

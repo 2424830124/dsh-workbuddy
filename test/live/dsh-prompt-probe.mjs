@@ -19,6 +19,7 @@ import { zstdDecompressSync } from 'node:zlib'
 import { WorkBuddyAdapter } from '../../src/llm/adapter.js'
 import { readToken } from '../../src/account/auth.js'
 import { REGIONS } from '../../src/core/regions.js'
+import { credentialService } from './credentials.mjs'
 
 const home = process.env.DSH_HOME ?? `${homedir()}/.dsh`
 const rounds = Number(process.argv[2] ?? 3)
@@ -72,12 +73,7 @@ console.log(`工具集: ${tools.length} 个（${tools.slice(0, 6).map(nameOf).jo
 
 const ctx = {
   logger: { info: () => {}, warn: () => {}, error: () => {} },
-  credentials: {
-    resolve: async (ref) => {
-      const match = new RegExp(`^[ \t]*${ref}:[ \t]*(.+)$`, 'm').exec(readFileSync(`${home}/.credentials.yaml`, 'utf8'))
-      return match === null ? undefined : { value: match[1].trim().replace(/^["']|["']$/g, '') }
-    }
-  },
+  credentials: credentialService,
   get: () => undefined
 }
 const token = await readToken(ctx, region)

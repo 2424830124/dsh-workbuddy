@@ -51,7 +51,6 @@ window.__ModuleLoader__.load({
         openPlansFailed: (url) => `没能自动打开浏览器，请手动访问：${url}`,
         creditsRate: '消耗速度（实时）',
         models: '模型',
-        login: '登录',
         loggingIn: '等待授权…',
         refreshList: '刷新列表',
         logout: '退出登录',
@@ -146,7 +145,6 @@ window.__ModuleLoader__.load({
         openPlansFailed: (url) => `Could not launch a browser — open this instead: ${url}`,
         creditsRate: 'Consumption rate (live)',
         models: 'Models',
-        login: 'Sign in',
         loggingIn: 'Awaiting authorization…',
         refreshList: 'Refresh list',
         logout: 'Sign out',
@@ -667,9 +665,15 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Verdicts that mean "the account cannot call this right now", and so belong in the
-     * unusable group. Shared with the state service so a selector plugin grouping by the
-     * same rule never disagrees with what this panel shows.
+     * Verdicts that mean "this cannot be called right now", and so belong in the unusable
+     * group. Shared with the state service so a selector plugin grouping by the same rule
+     * never disagrees with what this panel shows.
+     *
+     * Wider than the host's `SUSPENDING_STATES` (`src/catalog/availability.js`) on purpose:
+     * that one decides what the sweep switches off, and it stays at `dead`/`denied` because
+     * an exhausted balance or a spent rate window is an answer about the account, not the
+     * model — suspending on those would take the whole pool out of the picker at once. Here
+     * the question is only which card a row is filed under.
      */
     const UNUSABLE_STATES = new Set(['dead', 'denied', 'blocked', 'auth', 'noquota', 'throttled'])
     const isUnusable = (entry) => UNUSABLE_STATES.has(entry?.availability?.state)
@@ -766,10 +770,10 @@ window.__ModuleLoader__.load({
           // Already the sum over this deployment's accounts — the number the panel's
           // head row shows, so a consumer and the panel never disagree about a balance.
           credits: typeof credits?.total === 'number' ? credits.total : null,
-          // How many accounts back this deployment, and how many of them can be called.
-          // A consumer offering "switch account" needs the count; nothing else here does.
+          // How many accounts back this deployment. A consumer offering "switch account"
+          // needs the count; whether each one is callable is the panel's own row's business,
+          // and a second field saying it never had a reader.
           accounts: (region.accounts ?? []).length,
-          accountsUsable: (region.accounts ?? []).filter((entry) => entry.loggedIn === true).length,
           models
         }
       }
@@ -1760,6 +1764,11 @@ window.__ModuleLoader__.load({
         } catch (cause) {
           setError(cause instanceof Error ? cause.message : String(cause))
         } finally {
+          // Every other mutation publishes through `act()`, which refreshes the snapshot in
+          // its own `finally`. This button writes to the host directly, so without this the
+          // panel would show renewed tokens while a selector still read the old snapshot —
+          // until the five-minute timer happened to fire.
+          void stateService.refresh().catch(() => undefined)
           setBusy('')
         }
       }

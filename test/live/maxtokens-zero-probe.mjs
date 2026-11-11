@@ -8,24 +8,18 @@
  * China deployment only: its probes never start a completion, so this costs nothing.
  * Run: `node test/live/maxtokens-zero-probe.mjs`
  */
-import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
 import { readToken } from '../../src/account/auth.js'
 import { REGIONS } from '../../src/core/regions.js'
 import { chatRoutes } from '../../src/core/regions.js'
+import { credentialService } from './credentials.mjs'
 
-const home = process.env.DSH_HOME ?? `${homedir()}/.dsh`
 const region = REGIONS.cn
 
 const ctx = {
   logger: { info: () => {}, warn: () => {}, error: () => {} },
-  credentials: {
-    resolve: async (ref) => {
-      const match = new RegExp(`^[ \t]*${ref}:[ \t]*(.+)$`, 'm').exec(readFileSync(`${home}/.credentials.yaml`, 'utf8'))
-      return match === null ? undefined : { value: match[1].trim().replace(/^["']|["']$/g, '') }
-    }
-  }
+  credentials: credentialService
 }
 const token = await readToken(ctx, region)
 if (token === undefined || token.length === 0) { console.log('没有大陆版令牌'); process.exit(0) }

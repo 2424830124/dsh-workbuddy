@@ -14,12 +14,10 @@
  * Run: `node test/live/stream-cut-probe.mjs [cn|intl] [count] [modelId]`
  */
 
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-
 import { WorkBuddyAdapter } from '../../src/llm/adapter.js'
 import { readToken } from '../../src/account/auth.js'
 import { REGIONS } from '../../src/core/regions.js'
+import { credentialService } from './credentials.mjs'
 
 const region = REGIONS[process.argv[2] ?? 'cn']
 const count = Number(process.argv[3] ?? 5)
@@ -34,13 +32,7 @@ const ctx = {
     warn: (...args) => lines.push(args.join(' ')),
     error: (...args) => lines.push(args.join(' '))
   },
-  credentials: {
-    resolve: async (ref) => {
-      const path = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
-      const match = new RegExp(`^[ \t]*${ref}:[ \t]*(.+)$`, 'm').exec(readFileSync(path, 'utf8'))
-      return match === null ? undefined : { value: match[1].trim().replace(/^["']|["']$/g, '') }
-    }
-  },
+  credentials: credentialService,
   get: () => undefined
 }
 

@@ -183,7 +183,12 @@ function queueNotice(body) {
  * - `usage exceeds frequency limit…reset at <time>` — the account's window is used up until
  *   a stated time. Same argument: waiting out five retries cannot cross that window, so
  *   `RATE_WINDOW_EXCEEDED`, shown verbatim and not retried.
+ *
+ * The returned error's `code` is what decides whether the next account is tried
+ * (`FAILS_OVER` below) and whether the harness retries at all, so each branch has to pick
+ * its code deliberately rather than falling through to `httpErrorCode`.
  */
+
 /**
  * Refusals that follow the *account*, not the request.
  *
@@ -192,6 +197,9 @@ function queueNotice(body) {
  * account is being throttled (`RATE_LIMIT`), or its credential is rejected (`AUTH`).
  * Everything else — a delisted model, a refused request shape, a 5xx — would fail the
  * same way on the next account, so trying it only delays the honest answer.
+ *
+ * Kept in step with `requestFailure` above: a code it can return but this set omits would
+ * abort the step on the first account, which is the opposite of what the set is for.
  */
 const FAILS_OVER = new Set(['QUOTA', 'RATE_WINDOW_EXCEEDED', 'RATE_LIMIT', 'AUTH'])
 

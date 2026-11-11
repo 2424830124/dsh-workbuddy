@@ -6,15 +6,7 @@
  * Run: `node test/live/scoped-probe.mjs`
  */
 
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-
-const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
-const text = readFileSync(credentialsPath, 'utf8')
-const tokenOf = (name) => {
-  const match = new RegExp(`^[ \\t]*${name}:[ \\t]*(.+)$`, 'm').exec(text)
-  return match === null ? '' : match[1].trim().replace(/^['"]|['"]$/g, '')
-}
+import { tokenOf } from './credentials.mjs'
 
 const targets = [
   { name: 'INTL', endpoint: 'https://www.workbuddy.ai', domain: 'www.workbuddy.ai', token: tokenOf('WORKBUDDY_INTL_TOKEN') },

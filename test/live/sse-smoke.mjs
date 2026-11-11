@@ -1,22 +1,16 @@
 /** End-to-end check of the new SSE transport, against the free China deployment. */
-import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
 import { WorkBuddyAdapter } from '../../src/llm/adapter.js'
 import { readToken } from '../../src/account/auth.js'
 import { REGIONS } from '../../src/core/regions.js'
+import { credentialService } from './credentials.mjs'
 
-const home = process.env.DSH_HOME ?? `${homedir()}/.dsh`
 const region = REGIONS.cn
 
 const ctx = {
   logger: { info: () => {}, warn: (...args) => console.log('warn:', args.join(' ').slice(0, 160)), error: () => {} },
-  credentials: {
-    resolve: async (ref) => {
-      const match = new RegExp(`^[ \t]*${ref}:[ \t]*(.+)$`, 'm').exec(readFileSync(`${home}/.credentials.yaml`, 'utf8'))
-      return match === null ? undefined : { value: match[1].trim().replace(/^["']|["']$/g, '') }
-    }
-  },
+  credentials: credentialService,
   get: () => undefined
 }
 const token = await readToken(ctx, region)

@@ -1,19 +1,13 @@
 /** Which models are free right now, and which families do they belong to? */
-import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
 import { readToken } from '../../src/account/auth.js'
 import { REGIONS } from '../../src/core/regions.js'
+import { credentialService } from './credentials.mjs'
 
-const home = process.env.DSH_HOME ?? `${homedir()}/.dsh`
 const ctx = {
   logger: { info: () => {}, warn: console.warn, error: console.error },
-  credentials: {
-    resolve: async (ref) => {
-      const match = new RegExp(`^[ \t]*${ref}:[ \t]*(.+)$`, 'm').exec(readFileSync(`${home}/.credentials.yaml`, 'utf8'))
-      return match === null ? undefined : { value: match[1].trim().replace(/^["']|["']$/g, '') }
-    }
-  }
+  credentials: credentialService
 }
 
 for (const region of [REGIONS.cn, REGIONS.intl]) {

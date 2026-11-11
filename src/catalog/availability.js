@@ -19,9 +19,9 @@
  * the credits balance by 0.00, but this shape stays free no matter how billing
  * treats a cancelled stream.)
  *
- * Verdicts live in `$DSH_HOME/cache/dsh-workbuddy/availability-<region>.json`
- * keyed by model id, and the catalog drops ids whose last probe said `dead`
- * until that verdict ages out.
+ * Verdicts live in `$DSH_HOME/dsh-workbuddy/availability-<region>[-<account>].json`
+ * keyed by model id *per account*, and a verdict decides grouping and suspension until it
+ * ages out (`AVAILABILITY_TTL_MS`).
  *
  * The verdict is also learned for free: when a real chat turn fails with
  * `11102`, the adapter records it here, so a model that dies mid-session stops
@@ -29,7 +29,6 @@
  */
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { accountOf, accountUidOf, freshToken, usableSlot } from '../account/auth.js'
@@ -44,8 +43,16 @@ export const AVAILABILITY_TTL_MS = 12 * 3600_000
 const PROBE_CONCURRENCY = 3
 const PROBE_TIMEOUT_MS = 30_000
 
-/** States that keep a model out of the picker's usable group. */
-const UNUSABLE_STATES = new Set(['dead', 'denied'])
+/**
+ * Verdicts that make the sweep **suspend** a model the user had switched on.
+ *
+ * Deliberately narrower than the panel's 不可用 grouping. `auth`, `noquota` and `throttled`
+ * are answers about the *account*, not about the model — one exhausted balance would
+ * otherwise suspend every model of the pool at once, and lifting that would need a sweep to
+ * say so. The panel still files those rows under 不可用 (see `UNUSABLE_STATES` in
+ * `client/index.js`); the two lists answer different questions and are meant to differ.
+ */
+const SUSPENDING_STATES = new Set(['dead', 'denied'])
 
 function ledgerDir() {
   return ensurePluginDir()
@@ -373,31 +380,6 @@ function markSwept(regionId, account, uid) {
   }
 }
 
-/**
- * Ids the ledger currently groups as unusable (dead or no-permission, within the verdict's
- * TTL). The panel uses this for its 不可用 group; nothing offers a default from it any more.
- */
-export function unusableModelIds(regionId, now = Date.now(), account) {
-  const unusable = new Set()
-  for (const [id, entry] of readAvailability(regionId, account).models) {
-    if (!UNUSABLE_STATES.has(entry?.state)) continue
-    if (typeof entry.at !== 'number' || now - entry.at > AVAILABILITY_TTL_MS) continue
-    unusable.add(id)
-  }
-  return unusable
-}
-
-/** Kept for callers that only care about delisted models. */
-export function deadModelIds(regionId, now = Date.now(), account) {
-  const dead = new Set()
-  for (const [id, entry] of readAvailability(regionId, account).models) {
-    if (entry?.state !== 'dead') continue
-    if (typeof entry.at !== 'number' || now - entry.at > AVAILABILITY_TTL_MS) continue
-    dead.add(id)
-  }
-  return dead
-}
-
 /** One-line summary for the panel and the command. */
 export function availabilitySummary(regionId, account) {
   const ledger = readAvailability(regionId, account)
@@ -478,7 +460,7 @@ export function syncAutoOff(regionId, accountIds, now = Date.now()) {
   const merged = aggregateAvailability(regionId, accountIds).models
   const unusable = new Set()
   for (const [id, entry] of merged) {
-    if (!UNUSABLE_STATES.has(entry?.state)) continue
+    if (!SUSPENDING_STATES.has(entry?.state)) continue
     if (typeof entry.at !== 'number' || now - entry.at > AVAILABILITY_TTL_MS) continue
     unusable.add(id)
   }

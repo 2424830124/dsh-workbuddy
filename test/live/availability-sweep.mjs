@@ -6,23 +6,17 @@
  * Run: `node test/live/availability-sweep.mjs [cn|intl] [all]`
  */
 
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-
 import { runSweep, availabilitySummary } from '../../src/catalog/availability.js'
 import { readToken } from '../../src/account/auth.js'
 import { REGIONS } from '../../src/core/regions.js'
+import { silentCtx } from './credentials.mjs'
 
 const region = REGIONS[process.argv[2] ?? 'cn']
 const sweepAll = process.argv.includes('all')
 
 const ctx = {
-  logger: { info: (...args) => console.log('[info]', ...args), warn: (...args) => console.warn('[warn]', ...args), error: console.error },
-  credentials: { resolve: async (ref) => {
-    const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
-    const match = new RegExp(`^[ \\t]*${ref}:[ \\t]*(.+)$`, 'm').exec(readFileSync(credentialsPath, 'utf8'))
-    return match === null ? undefined : { value: match[1].trim().replace(/^["']|["']$/g, '') }
-  } }
+  ...silentCtx(),
+  logger: { info: (...args) => console.log('[info]', ...args), warn: (...args) => console.warn('[warn]', ...args), error: console.error }
 }
 
 const { fetchModelEntries } = await import('../../src/catalog/catalog.js')

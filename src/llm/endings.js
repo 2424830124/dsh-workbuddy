@@ -35,7 +35,7 @@ const TOOL_CALLS = new Set(['tool_calls', 'tool_use', 'function_call'])
  * @param {number} input.orphanCalls    tool-call fragments that never got a name
  * @param {number} input.blockCount     blocks that were actually delivered
  * @param {boolean} input.hasTools      a tool call was announced
- * @param {string} [install]
+ * @param {string} provider             the provider id every message is prefixed with
  * @returns {{ kind: string, failure?: { message: string, code: string }, note?: string }}
  */
 export function classifyEnding({ streamEnded, finishReason, argsTruncated, orphanCalls, blockCount, hasTools }, provider) {
@@ -73,9 +73,4 @@ export function classifyEnding({ streamEnded, finishReason, argsTruncated, orpha
   // "not losslessly JSON-serializable" and gets it rejected. Omit optional keys instead.
   if (finishReason === undefined) return { kind: 'stop', note: 'done-without-reason' }
   return { kind: 'stop' }
-}
-
-/** Whether this `finish_reason` is one of the tool-call spellings. */
-export function isToolCallReason(finishReason) {
-  return TOOL_CALLS.has(finishReason)
 }

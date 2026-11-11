@@ -6,13 +6,10 @@
  * Run: `node test/models-chat-probe.mjs`
  */
 
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-
 import { REGIONS, chatRoutes } from '../../src/core/regions.js'
+import { tokenOf } from './credentials.mjs'
 
-const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
-const token = (/^[ \t]*WORKBUDDY_CN_TOKEN:[ \t]*(.+)$/m.exec(readFileSync(credentialsPath, 'utf8'))?.[1] ?? '').trim().replace(/^["']|["']$/g, '')
+const token = tokenOf('WORKBUDDY_CN_TOKEN')
 if (token.length === 0) {
   console.log('no WORKBUDDY_CN_TOKEN')
   process.exit(1)

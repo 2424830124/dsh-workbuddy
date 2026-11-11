@@ -6,11 +6,7 @@
  * Run: `node test/live/boot-path-check.mjs`
  */
 
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-
-const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
-const yaml = readFileSync(credentialsPath, 'utf8')
+import { credentialService } from './credentials.mjs'
 
 const logs = []
 const logger = {
@@ -19,13 +15,7 @@ const logger = {
   error: (message) => { logs.push(`[E] ${message}`); console.log('[E]', message) }
 }
 
-const credentials = {
-  resolve: async (ref) => {
-    const match = new RegExp(`^[ \\t]*${ref}:[ \\t]*(.+)$`, 'm').exec(yaml)
-    return match === null ? undefined : { value: match[1].trim().replace(/^["']|["']$/g, '') }
-  },
-  set: async () => {}
-}
+const credentials = credentialService
 
 const ctx = {
   logger,

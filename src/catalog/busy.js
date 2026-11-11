@@ -22,8 +22,8 @@ const BUSY_TIMEOUT_MS = 15_000
 const cache = new Map()
 
 /**
- * @returns {Promise<Map<string, string>>} model id → busy level (`''` when the
- * deployment has no such endpoint)
+ * @returns {Promise<Map<string, string>>} model id → busy level; an empty map when the
+ * deployment has no such route (or the read failed), never a placeholder entry
  */
 export async function fetchBusyLevels(ctx, region, ids) {
   const cached = cache.get(region.id)

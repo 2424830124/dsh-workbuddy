@@ -6,19 +6,11 @@
  * Run: `node test/live/cn-probe-shape-check.mjs`
  */
 
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-
 import { probeBody } from '../../src/catalog/availability.js'
 import { chatRoutes, REGIONS } from '../../src/core/regions.js'
+import { tokenOf } from './credentials.mjs'
 
 const region = REGIONS.cn
-const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
-const yaml = readFileSync(credentialsPath, 'utf8')
-const tokenOf = (name) => {
-  const match = new RegExp(`^[ \\t]*${name}:[ \\t]*(.+)$`, 'm').exec(yaml)
-  return match === null ? '' : match[1].trim().replace(/^["']|["']$/g, '')
-}
 
 const [route] = chatRoutes(region)
 const body = probeBody(region, 'hy3')

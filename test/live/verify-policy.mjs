@@ -5,15 +5,12 @@
  * Run: `node test/live/verify-policy.mjs`
  */
 
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-
 import { WorkBuddyAdapter } from '../../src/llm/adapter.js'
 import { availabilitySummary } from '../../src/catalog/availability.js'
 import { REGIONS } from '../../src/core/regions.js'
+import { tokenOf } from './credentials.mjs'
 
-const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
-const token = (/^[ \t]*WORKBUDDY_CN_TOKEN:[ \t]*(.+)$/m.exec(readFileSync(credentialsPath, 'utf8'))?.[1] ?? '').trim().replace(/^["']|["']$/g, '')
+const token = tokenOf('WORKBUDDY_CN_TOKEN')
 console.log('token 长度:', token.length)
 
 const ctx = {

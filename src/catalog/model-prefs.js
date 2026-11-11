@@ -124,8 +124,8 @@ export function clearLoggedOut(regionId) {
  * - `enabled: true|false` — add to / remove from the enabled set
  * - `reset: true` — clear it, which means "everything off", the default
  *
- * @returns {{ saved: boolean, on: number, off: number }} `on` is the size of the set now,
- *   `off` no longer has a stored meaning and stays 0 so callers keep working.
+ * @returns {{ saved: boolean, on: number }} `on` is the size of the set now; there is no
+ *   "off" count to report, because an id that is not in the set is simply off.
  */
 export function setEnabled(regionId, ids, enabled, options = {}) {
   const prefs = readPrefs(regionId)
@@ -146,7 +146,7 @@ export function setEnabled(regionId, ids, enabled, options = {}) {
   }
   // Writing a choice also clears a stale logged-out marker, so a switch flipped while
   // logged out cannot stay hidden after the next login.
-  return { saved: write(regionId, prefs), on: prefs.enabled.size, off: 0 }
+  return { saved: write(regionId, prefs), on: prefs.enabled.size }
 }
 
 /**

@@ -44,7 +44,16 @@ const keyOf = (block) => [...block.matchAll(/^ {8}(\w+):/gm)].map((match) => mat
 const zhKeys = keyOf(zhBlock)
 const enKeys = keyOf(enBlock)
 const clientBody = client.replace(zhBlock, '').replace(enBlock, '')
-const unusedKeys = zhKeys.filter((key) => !new RegExp(`t\\(['"\`]${key}['"\`]`).test(clientBody))
+// A key counts as used either through a literal `t('key')` or through one of the lookup
+// tables (`BUSY_LABEL`, `AVAILABILITY_LABEL`, …), where the key appears as a quoted value.
+// Matching only the first form reported every table-driven label as dead.
+const unusedKeys = zhKeys.filter((key) => {
+  const asLiteral = new RegExp(`t\\(['"\`]${key}['"\`]`).test(clientBody)
+  // A key also appears as a bare literal anywhere a value is expected: after `:` in a table,
+  // after `? ` / `: ` in a ternary, inside an array, or behind `??`.
+  const asTableValue = new RegExp(`[:\\[,(?]\\s*['"\`]${key}['"\`]`).test(clientBody)
+  return !asLiteral && !asTableValue
+})
 const zhOnly = zhKeys.filter((key) => !enKeys.includes(key))
 const enOnly = enKeys.filter((key) => !zhKeys.includes(key))
 

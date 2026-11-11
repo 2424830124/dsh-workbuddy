@@ -9,18 +9,8 @@
  * Run: `node test/live/probe-cost-precise.mjs`
  */
 
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-
 import { probeBody } from '../../src/catalog/availability.js'
 import { chatRoutes, REGIONS } from '../../src/core/regions.js'
-
-const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
-const yaml = readFileSync(credentialsPath, 'utf8')
-const tokenOf = (name) => {
-  const match = new RegExp(`^[ \\t]*${name}:[ \\t]*(.+)$`, 'm').exec(yaml)
-  return match === null ? '' : match[1].trim().replace(/^["']|["']$/g, '')
-}
 
 async function balance(region) {
   const route = chatRoutes(region)[0]

@@ -6,15 +6,7 @@
  * Run: `node test/live/busy-probe.mjs`
  */
 
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-
-const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
-const text = readFileSync(credentialsPath, 'utf8')
-const tokenOf = (name) => {
-  const match = new RegExp(`^[ \\t]*${name}:[ \\t]*(.+)$`, 'm').exec(text)
-  return match === null ? '' : match[1].trim().replace(/^['"]|['"]$/g, '')
-}
+import { tokenOf } from './credentials.mjs'
 
 const models = ['hy3', 'deepseek-v4.1-flash', 'glm-5.3', 'auto', 'step-5-preview']
 const targets = [

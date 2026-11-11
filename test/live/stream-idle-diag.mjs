@@ -16,10 +16,8 @@
  *   --filler N  prepend N characters of filler to the prompt (long context, ~0.55 token/char)
  */
 
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-
 import { WorkBuddyAdapter } from '../../src/llm/adapter.js'
+import { credentialService } from './credentials.mjs'
 import { readToken } from '../../src/account/auth.js'
 import { REGIONS } from '../../src/core/regions.js'
 
@@ -38,13 +36,7 @@ const ctx = {
     warn: (...args) => lines.push(args.join(' ')),
     error: (...args) => lines.push(args.join(' '))
   },
-  credentials: {
-    resolve: async (ref) => {
-      const path = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
-      const match = new RegExp(`^[ \t]*${ref}:[ \t]*(.+)$`, 'm').exec(readFileSync(path, 'utf8'))
-      return match === null ? undefined : { value: match[1].trim().replace(/^["']|["']$/g, '') }
-    }
-  },
+  credentials: credentialService,
   get: () => undefined
 }
 

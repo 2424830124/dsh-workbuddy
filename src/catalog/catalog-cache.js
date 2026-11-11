@@ -37,12 +37,11 @@
  * than on the snapshot's `savedAt`, which every successful read of *any* model
  * would otherwise refresh.
  *
- * Location: `$DSH_HOME/cache/dsh-workbuddy/catalog-<region>.json`, falling back
- * to `~/.dsh/cache/...` when the environment does not set `DSH_HOME`.
+ * Location: `$DSH_HOME/dsh-workbuddy/catalog-<region>.json` (`~/.dsh/dsh-workbuddy/` when
+ * the environment does not set `DSH_HOME`), beside everything else the plugin owns.
  */
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { isCatalogModelId, keepModel, withConsistentEfforts } from './catalog.js'

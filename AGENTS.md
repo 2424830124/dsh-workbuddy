@@ -317,7 +317,7 @@ test/live/          需要真实账号的在线探针与诊断脚本
 npm test                          # 全部
 node test/unit/plugin.mjs         # provider 注册、目录、/workbuddy 命令、HTTP 路由
 node test/unit/api.mjs            # 面板接口：状态载荷、积分/签到、参数校验、信任栅栏、图标
-node test/unit/client.mjs         # 客户端：注册、词典回退、完整渲染、同名排序、token 单位、状态服务
+node test/unit/client.mjs         # 客户端：注册、词典回退、完整渲染、同名排序、token 单位、状态服务、续期后刷新快照
 node test/unit/region-order.mjs   # 显示顺序 ↔ 客户端占位顺序 ↔ 默认标签三者一致
 node test/unit/wire.mjs           # 工具结果保持 tool 角色、配对、旧格式、角色映射、reasoning 回放
 node test/unit/endings.mjs        # 结束分类整张表 + 优先级
@@ -326,7 +326,7 @@ node test/unit/catalog.mjs        # 双数据源并发抓取、合并、回退
 node test/unit/catalog-cache.mjs  # 追加语义、缺字段不覆盖、倍率不落盘、读取时重放准入
 node test/unit/official-list.mjs  # 名单导入、字段级富化（不含倍率）、清理
 node test/unit/model-prefs.mjs    # 默认全停、只记启用集合、批量开关、退出保留、v1 迁移、分部署探测形态
-node test/unit/availability.mjs   # 探测分类、dead 有效期、按 id 合并、分部署台账
+node test/unit/availability.mjs   # 探测分类、dead 有效期、按 id 合并、分部署/分账号台账、停用与恢复
 node test/unit/auth.mjs           # 退出删凭据、陈旧续期/登录结果不写回
 node test/unit/logout.mjs         # 退出隐藏全部模型、但启用集合保留，登录后照旧
 node test/unit/pool.mjs           # 账号池：零迁移的主账号、追加顺序、按账号凭据、回退规则、旧版 id 复原与去重
@@ -356,7 +356,14 @@ node test/unit/adapter.mjs        # 提示词改写、请求体组装、聊天�
 
 需要真实账号（`$DSH_HOME/dsh-workbuddy/credentials.json` 里的 `WORKBUDDY_INTL_TOKEN` / `WORKBUDDY_CN_TOKEN`，
 由面板登录写入；不再使用宿主的 `.credentials.yaml`），
-所以**不会**在 CI 里跑。常用：
+所以**不会**在 CI 里跑。
+
+**凭据只从 `test/live/credentials.mjs` 取**（`tokenOf(ref)` / `credentialService` / `silentCtx()`）。
+这一层是 2026-11-12 补的：插件 0.3.0 把令牌搬进自己的文档之后，四十多个探针还在各自解析宿主
+YAML，而且**不会报错**——它们只是永远找不到令牌，于是每个探针都"跑完了、什么都没输出"。
+新增探针用 `import { tokenOf } from './credentials.mjs'`，不要再自己读文件。
+
+常用：
 
 ```sh
 node test/live/host-log-tail.mjs 关键字      # 按 UTF-8 读宿主日志（PowerShell 会乱码）
@@ -429,7 +436,8 @@ node test/live/last-finishes.mjs "" [步数] dsh-model-picker          # 每步 
   **凭据失效**（橙）= `401/403`；其余进**未知**（灰），原始报文留在悬停里。
 - 分组只看结论（**只影响卡片归属，不影响开与关**）：`不可用模型` = dead/denied/blocked，
   其余（含未知、排队）留在可用组。
-- 台账 `availability-<region>.json` 按 id 记 `{state, detail, at}`，新结果覆盖旧的、其它条目保留；
+- 台账 `availability-<region>[-<账号>].json` 按 id 记 `{state, detail, at}`，新结果覆盖旧的、其它条目保留；
+  主账号沿用不带后缀那份，后加的账号各一份；
   不可用判定**有效期 12 小时**。同文件记 `lastSweepAt` 用于节流。
 - **自学习**：真实对话里回 `11102`/`11158` 直接写台账并失效目录缓存，不额外花请求。
 - 触发：打开面板自动一次（国内 10 分钟节流、国际 24 小时）；按钮=手动立即；`/workbuddy check`=全量。

@@ -5,17 +5,7 @@
  * Run: `node test/live/promotion-shape-probe.mjs`
  */
 
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-
 import { REGIONS } from '../../src/core/regions.js'
-
-const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
-const yaml = readFileSync(credentialsPath, 'utf8')
-const tokenOf = (name) => {
-  const match = new RegExp(`^[ \\t]*${name}:[ \\t]*(.+)$`, 'm').exec(yaml)
-  return match === null ? '' : match[1].trim().replace(/^["']|["']$/g, '')
-}
 
 for (const region of [REGIONS.intl, REGIONS.cn]) {
   const response = await fetch(`${region.endpoint}/v3/config`, {

@@ -109,7 +109,14 @@ export function sitePageUrl(region, page) {
   return `${region.endpoint}${path}`
 }
 
-/** Chat routes in preference order: the web host first, the gateway as fallback. */
+/**
+ * Chat routes in preference order: the web host first, the gateway as fallback.
+ *
+ * A deployment states them as `chatEndpoints` (China has two); one that does not gets the
+ * single route built from its own `endpoint`. That is every deployment this plugin has —
+ * the `chatEndpoint`/`chatApiDomain` overrides this used to consult were never set in
+ * `REGIONS`, so the branch that read them could only ever produce the same single route.
+ */
 export function chatRoutes(region) {
   const build = (endpoint, apiDomain) => ({
     endpoint,
@@ -122,9 +129,7 @@ export function chatRoutes(region) {
   if (Array.isArray(region.chatEndpoints) && region.chatEndpoints.length > 0) {
     return region.chatEndpoints.map((route) => build(route.endpoint, route.apiDomain))
   }
-  const primary = build(region.chatEndpoint ?? region.endpoint, region.chatApiDomain ?? region.apiDomain)
-  if (region.chatEndpoint === undefined || region.chatEndpoint === region.endpoint) return [primary]
-  return [primary, build(region.endpoint, region.apiDomain)]
+  return [build(region.endpoint, region.apiDomain)]
 }
 
 /**

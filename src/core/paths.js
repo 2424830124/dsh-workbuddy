@@ -12,8 +12,8 @@
  *
  * The exported surface is the directory, the credential reads, the credential writes, and
  * `credentialRefs()` — the ref list the account pool scans to notice credentials whose pool
- * entry went missing. Path helpers with no caller were deleted rather than left as an unused
- * API surface.
+ * entry went missing. Everything else here is private: a path helper with no caller is
+ * deleted rather than left as unused API.
  */
 
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'

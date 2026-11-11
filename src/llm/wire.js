@@ -31,7 +31,6 @@ function normalizeToolArguments(raw) {
 
 const hasUsableToolName = (name) => typeof name === 'string' && name.trim().length > 0
 
-/** Keep only tool call/result pairs that are complete on both sides. */
 /**
  * The call id a result message answers.
  *
@@ -46,6 +45,7 @@ function toolResultCallId(message) {
   return id === undefined || id === null ? undefined : String(id)
 }
 
+/** Keep only tool call/result pairs that are complete on both sides. */
 function resolveToolPairing(messages) {
   const allResultIds = new Set()
   for (const message of messages) {
@@ -97,6 +97,29 @@ function userContentParts(content, imageUrls) {
 }
 
 /**
+ * One tool result's text, with any images it carries pulled out.
+ *
+ * Images cannot ride on a `tool` message, so they are collected into `imageBucket` and sent
+ * as a separate user turn later; what comes back is only the text. Both shapes of a result —
+ * a `tool` message of its own and a `tool-result` block inside an older transcript — reach
+ * this with the same content, which is why one helper serves both.
+ *
+ * @param {unknown} content the result's content (message content or block content)
+ * @param {Map<string, string> | undefined} imageUrls attachment id → data URL
+ * @param {object[]} imageBucket where extracted image parts are appended
+ * @returns {string} the text to put in the `tool` message; never empty
+ */
+function toolResultText(content, imageUrls, imageBucket) {
+  const fallback = () => contentToText(content) || '(no output)'
+  if (imageUrls === undefined || !Array.isArray(content)) return fallback()
+  const parts = userContentParts(content, imageUrls)
+  if (parts === undefined) return fallback()
+  imageBucket.push(...parts.filter((part) => part.type !== 'text'))
+  const text = parts.filter((part) => part.type === 'text').map((part) => String(part.text)).join('')
+  return text.length > 0 ? text : '(no output)'
+}
+
+/**
  * Convert harness messages into the OpenAI-compatible wire array, matching the
  * shape the official clients send (including `reasoning_content` replay on
  * assistant turns, which WorkBuddy accepts).
@@ -143,19 +166,7 @@ function toWireMessages(messages, imageUrls) {
     const resultCallId = toolResultCallId(message)
     if (resultCallId !== undefined) {
       if (!keepResultIds.has(resultCallId)) continue
-      let resultText = '(no output)'
-      if (imageUrls !== undefined && Array.isArray(message.content)) {
-        const resultParts = userContentParts(message.content, imageUrls)
-        if (resultParts !== undefined) {
-          pendingToolImages.push(...resultParts.filter((part) => part.type !== 'text'))
-          const joined = resultParts.filter((part) => part.type === 'text').map((part) => String(part.text)).join('')
-          if (joined.length > 0) resultText = joined
-        } else {
-          resultText = contentToText(message.content) || '(no output)'
-        }
-      } else {
-        resultText = contentToText(message.content) || '(no output)'
-      }
+      const resultText = toolResultText(message.content, imageUrls, pendingToolImages)
       wire.push({ role: 'tool', tool_call_id: resultCallId, content: resultText })
       continue
     }
@@ -174,19 +185,7 @@ function toWireMessages(messages, imageUrls) {
     }
     for (const result of toolResults) {
       if (!keepResultIds.has(String(result.toolCallId))) continue
-      let resultText = '(no output)'
-      if (imageUrls !== undefined && Array.isArray(result.content)) {
-        const resultParts = userContentParts(result.content, imageUrls)
-        if (resultParts !== undefined) {
-          pendingToolImages.push(...resultParts.filter((part) => part.type !== 'text'))
-          const joined = resultParts.filter((part) => part.type === 'text').map((part) => String(part.text)).join('')
-          if (joined.length > 0) resultText = joined
-        } else {
-          resultText = contentToText(result.content) || '(no output)'
-        }
-      } else {
-        resultText = contentToText(result.content) || '(no output)'
-      }
+      const resultText = toolResultText(result.content, imageUrls, pendingToolImages)
       wire.push({ role: 'tool', tool_call_id: String(result.toolCallId), content: resultText })
     }
   }

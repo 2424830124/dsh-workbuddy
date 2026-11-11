@@ -5,15 +5,12 @@
  * Run: `node test/live/verify-intl-list.mjs`
  */
 
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-
 import { WorkBuddyAdapter } from '../../src/llm/adapter.js'
 import { readOfficialList } from '../../src/catalog/official-list.js'
 import { REGIONS } from '../../src/core/regions.js'
+import { tokenOf } from './credentials.mjs'
 
-const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
-const token = (/^[ \t]*WORKBUDDY_INTL_TOKEN:[ \t]*(.+)$/m.exec(readFileSync(credentialsPath, 'utf8'))?.[1] ?? '').trim().replace(/^["']|["']$/g, '')
+const token = tokenOf('WORKBUDDY_INTL_TOKEN')
 
 const list = readOfficialList('intl')
 console.log('导入的账号名单:', list === undefined ? '(无)' : `${list.ids.length} 个，来源 ${list.from}，时间 ${new Date(list.importedAt).toLocaleString()}`)

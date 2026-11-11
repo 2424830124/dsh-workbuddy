@@ -25,9 +25,6 @@ console.log(`包名/版本: ${packageJson.name}@${packageJson.version}`)
 console.log(`依赖: ${JSON.stringify(packageJson.dependencies ?? {})} （应为空）`)
 console.log(`客户端半边: ${JSON.stringify(packageJson.dsh?.client ?? null)}`)
 
-const credentialsPath = join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), '.credentials.yaml')
-const credentials = existsSync(credentialsPath) ? readFileSync(credentialsPath, 'utf8') : ''
-
 const logs = []
 const logger = {
   info: (message) => { logs.push(`I ${message}`); console.log('I', message) },
@@ -35,11 +32,11 @@ const logger = {
   error: (message) => { logs.push(`E ${message}`); console.error('E', message) }
 }
 
+// Read through the *installed* copy's own resolver: the credential document is per DSH_HOME,
+// not per package, so what this checks is that the shipped code can find it.
+const { resolveCredential } = await import(join(installed, 'src/core/paths.js'))
 const credentialService = {
-  resolve: async (ref) => {
-    const match = new RegExp(`^[ \\t]*${ref}:[ \\t]*(.+)$`, 'm').exec(credentials)
-    return match === null ? undefined : { value: match[1].trim().replace(/^["']|["']$/g, '') }
-  },
+  resolve: async (ref) => resolveCredential(ref),
   set: async () => {}
 }
 

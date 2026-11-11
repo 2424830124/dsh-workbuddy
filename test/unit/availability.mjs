@@ -14,7 +14,7 @@ import { join } from 'node:path'
 process.env.DSH_HOME = join(tmpdir(), 'dsh-workbuddy-availability-test')
 rmSync(process.env.DSH_HOME, { recursive: true, force: true })
 
-const { AVAILABILITY_TTL_MS, aggregateAvailability, availabilitySummary, classifyProbe, deadModelIds, probeBody, probeModel, readAvailability, runSweep, syncAutoOff, writeAvailability } = await import('../../src/catalog/availability.js')
+const { AVAILABILITY_TTL_MS, aggregateAvailability, availabilitySummary, classifyProbe, probeBody, probeModel, readAvailability, runSweep, syncAutoOff, writeAvailability } = await import('../../src/catalog/availability.js')
 const { isEnabled, readPrefs, setEnabled } = await import('../../src/catalog/model-prefs.js')
 const { PRIMARY_ACCOUNT } = await import('../../src/account/pool.js')
 const { REGIONS, chatRoutes } = await import('../../src/core/regions.js')
@@ -99,9 +99,8 @@ assert.equal(classifyProbe(401, 'nope').state, 'auth')
 assert.equal(classifyProbe(502, '<html>502</html>').state, 'down')
 assert.equal(classifyProbe(0, '').state, 'error', 'a transport failure is not a verdict about the model')
 
-// Only `dead` counts as delisted; queueing and provider hiccups are not verdicts about
-// the model (they no longer *hide* one — the switch decides that — but they still group).
-assert.deepEqual(deadModelIds('cn'), new Set(), 'nothing is dead before the first sweep')
+// The ledger starts empty: a deployment nobody probed has no verdicts at all.
+assert.equal(aggregateAvailability('cn', [PRIMARY_ACCOUNT]).models.size, 0, 'nothing is known before the first sweep')
 
 writeAvailability('cn', [
   { id: 'glm-4.6', state: 'dead', detail: '模型不存在', at: Date.now() },
@@ -109,7 +108,9 @@ writeAvailability('cn', [
   { id: 'step-5-preview', state: 'busy', detail: '排队', at: Date.now() },
   { id: 'glm-5.1', state: 'rejected', detail: '参数被拒', at: Date.now() }
 ])
-assert.deepEqual([...deadModelIds('cn')], ['glm-4.6'], 'only the dead verdict counts as delisted')
+const merged = aggregateAvailability('cn', [PRIMARY_ACCOUNT]).models
+assert.equal(merged.get('glm-4.6').state, 'dead', 'a delisted model keeps its own verdict')
+assert.equal(merged.get('hy3').state, 'ok', 'and a working one is not dragged down with it')
 
 const ledger = readAvailability('cn')
 assert.equal(ledger.models.size, 4)
@@ -120,9 +121,9 @@ writeAvailability('cn', [{ id: 'glm-4.6', state: 'ok', detail: '', at: Date.now(
 assert.equal(readAvailability('cn').models.get('glm-4.6').state, 'ok', 'a fresh verdict wins')
 assert.equal(readAvailability('cn').models.size, 4, 'other verdicts stay')
 
-// An old `dead` verdict ages out, so a model is advertised again and re-probed.
+// An old `dead` verdict ages out of every decision that reads the TTL, but the ledger still
+// holds it: the panel shows the last thing it was told.
 writeAvailability('cn', [{ id: 'glm-4.7', state: 'dead', detail: '模型不存在', at: Date.now() - AVAILABILITY_TTL_MS - 1000 }])
-assert.ok(!deadModelIds('cn').has('glm-4.7'), 'a verdict past its TTL is no longer delisted')
 assert.equal(readAvailability('cn').models.get('glm-4.7').state, 'dead', 'the stale verdict is still shown')
 
 const summary = availabilitySummary('cn')

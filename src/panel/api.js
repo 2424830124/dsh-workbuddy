@@ -15,7 +15,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
 import { accountOf, beginLogin, cancelLogin, logoutRegion, pendingAccounts, pendingLoginFor, pendingLogins, prefsFor, readMeta, readToken, refreshRegion, regionStatus, slotKey, usableSlot } from '../account/auth.js'
-import { PRIMARY_ACCOUNT, accountSlots, listAccounts, newAccountId, slotFor } from '../account/pool.js'
+import { accountSlots, listAccounts, newAccountId, slotFor } from '../account/pool.js'
 import { invalidateBusy, fetchBusyLevels } from '../catalog/busy.js'
 import { SWEEP_MIN_INTERVAL_MS, aggregateAvailability, runSweep, sweepDue } from '../catalog/availability.js'
 import { claimDailyCheckin, fetchCheckinStatus, fetchCredits } from '../account/credits.js'
@@ -400,7 +400,6 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
           region: region.id,
           saved: result.saved,
           on: result.on,
-          off: result.off,
           total: models.length,
           enabledCount: models.filter((entry) => isEnabled(prefs, entry.id)).length
         })
@@ -511,7 +510,9 @@ export function registerWorkbuddyApi(ctx, adapters, options = {}) {
           return
         }
         try {
-          const models = adapters[region.id] === undefined ? [] : await adapters[region.id].models()
+          // The adapters are registered by `apply()` for both deployments at once, so one
+          // cannot be missing here without the whole plugin having failed to load.
+          const models = await adapters[region.id].models()
           if (url.searchParams.get('refresh') === '1') invalidateBusy(region.id)
           const levels = await fetchBusyLevels(ctx, region, models.map((entry) => entry.id))
           sendJson(res, 200, { region: region.id, levels: Object.fromEntries(levels) })

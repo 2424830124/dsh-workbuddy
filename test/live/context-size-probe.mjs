@@ -6,25 +6,19 @@
  *
  * Run: `node test/live/context-size-probe.mjs [fillerChars…]`
  */
-import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
 import { WorkBuddyAdapter } from '../../src/llm/adapter.js'
 import { readToken } from '../../src/account/auth.js'
 import { REGIONS } from '../../src/core/regions.js'
+import { credentialService } from './credentials.mjs'
 
-const home = process.env.DSH_HOME ?? `${homedir()}/.dsh`
 const sizes = process.argv.slice(2).map(Number)
 const targets = sizes.length > 0 ? sizes : [0, 30_000, 90_000, 200_000]
 
 const ctx = {
   logger: { info: () => {}, warn: () => {}, error: () => {} },
-  credentials: {
-    resolve: async (ref) => {
-      const match = new RegExp(`^[ \t]*${ref}:[ \t]*(.+)$`, 'm').exec(readFileSync(`${home}/.credentials.yaml`, 'utf8'))
-      return match === null ? undefined : { value: match[1].trim().replace(/^["']|["']$/g, '') }
-    }
-  },
+  credentials: credentialService,
   get: () => undefined
 }
 const token = await readToken(ctx, REGIONS.intl)

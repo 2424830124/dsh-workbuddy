@@ -22,11 +22,10 @@
  * therefore enriches the catalog field by field instead of only flagging ids.
  * Rates are excluded from that enrichment on purpose (see `ENRICHABLE`).
  *
- * File: `$DSH_HOME/cache/dsh-workbuddy/official-<region>.json`
+ * File: `$DSH_HOME/dsh-workbuddy/official-<region>[-<account>].json`
  */
 
 import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { entryFromMeta, isAdvertisableId } from './catalog.js'

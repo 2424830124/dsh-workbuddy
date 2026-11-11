@@ -6,20 +6,15 @@
  * Run: `node test/intl-probe.mjs`
  */
 
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-
 import { fetchModelEntries } from '../../src/catalog/catalog.js'
 import { REGIONS } from '../../src/core/regions.js'
+import { tokenOf } from './credentials.mjs'
 
-const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
-const text = readFileSync(credentialsPath, 'utf8')
-const match = /^[ \t]*WORKBUDDY_INTL_TOKEN:[ \t]*(.+)$/m.exec(text)
-if (match === null) {
+const token = tokenOf('WORKBUDDY_INTL_TOKEN')
+if (token.length === 0) {
   console.log('no WORKBUDDY_INTL_TOKEN found')
   process.exit(1)
 }
-const token = match[1].trim().replace(/^['"]|['"]$/g, '')
 console.log('token length:', token.length)
 
 const headers = {

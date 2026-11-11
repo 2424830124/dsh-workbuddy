@@ -27,7 +27,7 @@ import {
   tokenNickname
 } from '../core/http.js'
 import { readCredential as readRef, resolveCredential, setCredential, unsetCredential } from '../core/paths.js'
-import { PRIMARY_ACCOUNT, listAccounts, newAccountId, refsFor, registerAccount, removeAccount, slotFor } from './pool.js'
+import { PRIMARY_ACCOUNT, listAccounts, newAccountId, registerAccount, removeAccount, slotFor } from './pool.js'
 import { clearLoggedOut, markLoggedOut, readPrefs } from '../catalog/model-prefs.js'
 import { REGION_IDS, REGIONS, openInBrowser } from '../core/regions.js'
 

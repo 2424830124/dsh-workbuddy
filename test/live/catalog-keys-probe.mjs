@@ -6,12 +6,13 @@
  * Run: `node test/live/catalog-keys-probe.mjs`
  */
 
-import { readFileSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const credentialsPath = process.env.DSH_HOME ? `${process.env.DSH_HOME}/.credentials.yaml` : `${homedir()}/.dsh/.credentials.yaml`
-const token = (/^[ \t]*WORKBUDDY_CN_TOKEN:[ \t]*(.+)$/m.exec(readFileSync(credentialsPath, 'utf8'))?.[1] ?? '').trim().replace(/^["']|["']$/g, '')
+import { tokenOf } from './credentials.mjs'
+
+const token = tokenOf('WORKBUDDY_CN_TOKEN')
 
 const response = await fetch('https://www.workbuddy.cn/console/enterprises/personal/models', {
   headers: {
