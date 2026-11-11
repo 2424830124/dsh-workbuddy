@@ -1,0 +1,2041 @@
+/**
+ * Client half: the WorkBuddy page inside Settings → WorkBuddy.
+ *
+ * One card, two accounts: a tab strip switches which deployment's details are
+ * shown, but both stay signed in independently — switching is display-only.
+ * The card always lists the active account's models, and shows its credits and
+ * daily check-in state (the Host claims automatically at startup and at local
+ * midnight; the button here is the manual fallback).
+ *
+ * The accent color comes from the plugin icon (WorkBuddy green) instead of the
+ * host theme, so the buttons keep their contrast in both light and dark skins.
+ *
+ * The packaged desktop app has no devtools, so each load stage also reports to
+ * `POST /workbuddy/client-log`, which lands in the host log — that is how
+ * "bundle never loaded" stays distinguishable from "loaded but apply() threw".
+ */
+
+window.__ModuleLoader__.load({
+  id: '@huai_xin/dsh-workbuddy',
+  factory(require) {
+    const report = (stage) => {
+      try {
+        void fetch('/workbuddy/client-log', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ stage }),
+          keepalive: true
+        }).catch(() => {})
+      } catch {
+        // diagnostics must never break the panel
+      }
+    }
+    report('module-evaluated')
+
+    const React = require('react')
+    const h = React.createElement
+
+    const API = '/workbuddy'
+
+    const DICT = {
+      'zh-CN': {
+        section: 'WorkBuddy',
+        title: 'WorkBuddy 模型',
+        intro: '两个部署各自独立登录；切换标签只切换查看，不影响已登录的账号。积分会在软件启动时和每天 0 点自动领取一次。',
+        regionIntl: '海外版',
+        regionCn: '大陆版',
+        cardAccounts: '账户',
+        refreshCredits: '刷新积分',
+        openPlans: '套餐',
+        openPlansHint: '在浏览器打开该部署的官方套餐页（用量与订阅）',
+        openPlansFailed: (url) => `没能自动打开浏览器，请手动访问：${url}`,
+        creditsRate: '消耗速度（实时）',
+        models: '模型',
+        loggingIn: '等待授权…',
+        refreshList: '刷新列表',
+        logout: '退出登录',
+        claim: '立即领取',
+        claiming: '领取中…',
+        checkedIn: '今日已签到',
+        lastClaim: (when, result) => `上次自动领取：${when} · ${result}`,
+        claimResult: (credit) => `+${credit} 积分`,
+        loading: '加载中…',
+        unknown: '未知',
+        count: (n) => `${n} 个`,
+        accountCount: (n) => `${n} 个账号`,
+        loginHint: '已在系统浏览器打开授权页面；完成授权后本页会自动刷新。若浏览器没有打开，请复制下面的链接手动访问：',
+        copy: '复制链接',
+        copied: '已复制',
+        cancelLogin: '取消这次登录',
+        emptyModels: '没有读取到模型',
+        catalogUnavailable: '取不到模型列表，点「刷新列表」重试',
+        catalogCache: '本地缓存',
+        saveFailed: '保存失败，这次改动没有写入磁盘',
+        checkAvailability: '检测可用性',
+        checking: '检测中…',
+        availabilityHint: '给每个模型各发一个最小请求，判定它是不是真的可用；判定为不可用的会自动停用并移到「不可用模型」分组，等它恢复可用，开关会回到你原来的状态',
+        availabilityResult: (ok, dead) => `检测：可用 ${ok} / 不可用 ${dead}`,
+        statusLoggedIn: '已登录',
+        statusLoggedOut: '未登录',
+        statusExpired: '已过期',
+        statusPending: '等待授权',
+        search: '搜索模型',
+        groupUsable: '可用模型',
+        groupUnusable: '不可用模型',
+        enableAll: '全部启用',
+        enableAllHint: '把「可用模型」分组里的模型全部放进模型选择器（不动不可用分组）',
+        disableAll: '全部停用',
+        disableAllHint: '移出模型选择器：两组都算，面板里仍然保留，随时开回来',
+        renewBoth: '续期',
+        renewBothHint: '两个部署一起续期（未登录的跳过）',
+        renewing: '续期中…',
+        enableModel: '在模型选择器中启用',
+        disableModel: '在模型选择器中停用',
+        noMatch: (query) => `没有匹配「${query}」的模型`,
+        stateDead: '不可用',
+        stateDenied: '无权限',
+        stateAuth: '凭据失效',
+        stateNoQuota: '积分不足',
+        stateThrottled: '限流',
+        stateUnknown: '未知',
+        detailId: '标识',
+        detailContext: '上下文',
+        detailMaxOutput: '最大输出',
+        detailEfforts: '思考档位',
+        detailRate: '倍率',
+        detailDescription: '描述',
+        detailModality: '模态',
+        freeModel: '免费',
+        autoOff: '已自动停用',
+        autoOffHint: '探测到它当前不可用，已自动停用；等它恢复可用，开关会回到你原来的状态',
+        promoDiscount: '折扣',
+        detailPromoKind: '促销类型',
+        detailPromoWindow: '促销时限',
+        detailPromoText: '促销详情',
+        detailBusy: '繁忙程度',
+        busyIdle: '空闲',
+        busyBusy: '繁忙',
+        busyCongested: '拥堵',
+        busyBusyOfficial: '轻微拥堵',
+        busyCongestedOfficial: '极度拥堵',
+        busyUnknown: '未知',
+        modalityText: '文本',
+        modalityImage: '图像',
+        noModels: '登录后这里会显示这个部署可用的模型',
+        addAccount: '添加账号',
+        addAccountHint: '再登录一个账号：它排在这一栏的最后，前一个账号积分不足或限流时才会用到它',
+        noAccounts: '这一栏还没有账号，点「添加账号」登录',
+        totalCredits: '总积分',
+        totalCreditsHint: '这一栏所有账号的积分之和',
+        accountCredits: '该账号的积分',
+        renewAccount: '续期',
+        renewAccountHint: '只续期这一个账号',
+        primaryAccountHint: '这个部署原有的账号（凭据就存在原来的位置）'
+      },
+      en: {
+        section: 'WorkBuddy',
+        title: 'WorkBuddy Models',
+        intro: 'The two deployments sign in independently; switching tabs only changes what you are looking at. Credits are claimed automatically at startup and at local midnight.',
+        regionIntl: 'Overseas',
+        regionCn: 'Mainland',
+        cardAccounts: 'Accounts',
+        refreshCredits: 'Refresh credits',
+        openPlans: 'Plans',
+        openPlansHint: 'Open this deployment’s official plans page in your browser',
+        openPlansFailed: (url) => `Could not launch a browser — open this instead: ${url}`,
+        creditsRate: 'Consumption rate (live)',
+        models: 'Models',
+        loggingIn: 'Awaiting authorization…',
+        refreshList: 'Refresh list',
+        logout: 'Sign out',
+        claim: 'Claim now',
+        claiming: 'Claiming…',
+        checkedIn: 'Checked in today',
+        lastClaim: (when, result) => `Last automatic claim: ${when} · ${result}`,
+        claimResult: (credit) => `+${credit} credits`,
+        loading: 'Loading…',
+        unknown: 'unknown',
+        count: (n) => `${n}`,
+        accountCount: (n) => `${n} account${n === 1 ? '' : 's'}`,
+        loginHint: 'The authorization page was opened in your browser; this panel refreshes once you finish. If nothing opened, copy this link:',
+        copy: 'Copy link',
+        copied: 'Copied',
+        cancelLogin: 'Cancel this login',
+        emptyModels: 'No models were returned',
+        catalogUnavailable: 'No model list available — try “Refresh list”',
+        catalogCache: 'cached locally',
+        saveFailed: 'Save failed — this change was not written to disk',
+        checkAvailability: 'Check availability',
+        checking: 'Checking…',
+        availabilityHint: 'Probes every model with one request that cannot generate tokens; one that fails is switched off and moved to the unusable group, and returns to where you left it once it answers again',
+        availabilityResult: (ok, dead) => `checked: ${ok} usable / ${dead} unusable`,
+        statusLoggedIn: 'Signed in',
+        statusLoggedOut: 'Not signed in',
+        statusExpired: 'Expired',
+        statusPending: 'Awaiting authorization',
+        search: 'Search models',
+        groupUsable: 'Usable models',
+        groupUnusable: 'Unusable models',
+        enableAll: 'Enable all',
+        enableAllHint: 'Offer every model in this list in the picker',
+        disableAll: 'Disable all',
+        disableAllHint: 'Take every model out of the picker, both groups (they stay here and can be turned back on)',
+        renewBoth: 'Renew',
+        renewBothHint: 'Renew both deployments at once (signed-out ones are skipped)',
+        renewing: 'Renewing…',
+        enableModel: 'Offer this model in the picker',
+        disableModel: 'Hide this model from the picker',
+        noMatch: (query) => `No model matches “${query}”`,
+        stateDead: 'unusable',
+        stateDenied: 'no permission',
+        stateAuth: 'credentials rejected',
+        stateNoQuota: 'out of credits',
+        stateThrottled: 'rate limited',
+        stateUnknown: 'unknown',
+        detailId: 'ID',
+        detailContext: 'Context',
+        detailMaxOutput: 'Max output',
+        detailEfforts: 'Reasoning',
+        detailRate: 'Rate',
+        detailDescription: 'Description',
+        detailModality: 'Modality',
+        freeModel: 'free',
+        autoOff: 'auto-disabled',
+        autoOffHint: 'Probed as unusable, so this is switched off; when it answers again the switch returns to where you left it',
+        promoDiscount: 'discount',
+        detailPromoKind: 'Promotion',
+        detailPromoWindow: 'Window',
+        detailPromoText: 'Details',
+        detailBusy: 'Load',
+        busyIdle: 'idle',
+        busyBusy: 'busy',
+        busyCongested: 'congested',
+        busyBusyOfficial: 'slightly congested',
+        busyCongestedOfficial: 'extremely congested',
+        busyUnknown: 'unknown',
+        modalityText: 'text',
+        modalityImage: 'image',
+        noModels: 'Models appear here once the deployment is signed in',
+        addAccount: 'Add account',
+        addAccountHint: 'Sign in one more account: it goes last in this block, and is only used when an earlier one is out of credits or rate limited',
+        noAccounts: 'No account in this block yet — use “Add account”',
+        totalCredits: 'Total',
+        totalCreditsHint: 'The sum of every account in this block',
+        accountCredits: 'This account’s credits',
+        renewAccount: 'Renew',
+        renewAccountHint: 'Renew this account only',
+        primaryAccountHint: 'The deployment’s original account (its credentials stay where they always were)'
+      }
+    }
+
+    const dictFor = (localeId) => (String(localeId).toLowerCase().startsWith('zh') ? DICT['zh-CN'] : DICT.en)
+
+    const CSS = `
+.wb-root {
+  --wb-accent: #12bfa0; --wb-accent-strong: #0da88c; --wb-accent-soft: rgba(18,191,160,.12);
+  --wb-line: var(--dsw-alias-border-l1, rgba(128,138,150,.28));
+  --wb-line-soft: var(--dsw-alias-border-l2, rgba(128,138,150,.16));
+  /* A control's own outline, deliberately brighter than a divider: the theme's
+     border tokens are tuned for separation, and they made these buttons read as
+     text. Mixed from the theme's text colour, so it stays visible in either
+     theme; the plain rgba is the fallback for engines without color-mix. */
+  --wb-control-line: rgba(150,160,175,.45);
+  --wb-control-line: color-mix(in srgb, var(--wb-text) 32%, transparent);
+  --wb-muted: var(--dsw-alias-label-secondary, #9aa1ab);
+  --wb-text: var(--dsw-alias-label-primary, #e6e8eb);
+  --wb-surface: var(--dsw-alias-bg-layer-1, rgba(128,138,150,.04));
+  --wb-surface-hover: var(--dsw-alias-bg-layer-2, rgba(128,138,150,.09));
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  max-width: 820px; padding: 4px 0 40px; font-size: 13px; line-height: 1.6; color: var(--wb-text);
+}
+.wb-title { margin: 0 0 4px; font-size: 16px; font-weight: 650; letter-spacing: -.01em; }
+.wb-intro { margin: 0 0 20px; font-size: 12.5px; line-height: 1.7; color: var(--wb-muted); max-width: 62ch; }
+
+/* cards ----------------------------------------------------------------- */
+.wb-card { border: 1px solid var(--wb-line); background: var(--wb-surface); border-radius: 14px; overflow: hidden; }
+.wb-card + .wb-card { margin-top: 16px; }
+.wb-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 14px 16px 12px; }
+.wb-card-title { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--wb-muted); }
+.wb-account-card { border-radius: 12px; border-color: var(--wb-line-soft); }
+.wb-account-card .wb-card-head { gap: 10px; }
+.wb-account-card .wb-card-title { letter-spacing: 0; text-transform: none; color: var(--wb-text); }
+.wb-account-card .wb-btn { border-radius: 6px; }
+.wb-account-card .wb-card-head .wb-btn { min-width: 52px; }
+.wb-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px 12px; }
+/* The mark is a mask painted with the accent colour: one asset, both themes. */
+.wb-logo { flex: none; width: 30px; height: 30px; display: block; background: var(--wb-accent-strong);
+  -webkit-mask: url('/workbuddy/icon-mask') center / contain no-repeat;
+  mask: url('/workbuddy/icon-mask') center / contain no-repeat; }
+
+/* accounts — one card per deployment, stacked ------------------------------
+   Originally a transposed table (deployments as columns, fields as rows). Once a
+   deployment can hold several accounts a column stops being wide enough for the
+   actions, and the two deployments no longer read as a pair — so each is its own
+   block: a head row with the deployment, its summed balance and its own actions,
+   then one row per account. */
+.wb-pool { padding: 0 12px 12px; }
+.wb-pool-block { border: 1px solid var(--wb-line-soft); border-radius: 12px; background: var(--wb-surface); }
+.wb-pool-block + .wb-pool-block { margin-top: 10px; }
+.wb-pool-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 11px 12px 9px; }
+.wb-pool-name { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 620; }
+.wb-deploy-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
+/* The summed balance sits right after the deployment name, which is where the
+   eye looks for "how much is left here". */
+.wb-pool-credits { display: inline-flex; align-items: center; gap: 6px; margin-left: 2px; }
+.wb-pool-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+/* One account line: who it is, when it lapses, what can be done to it. */
+.wb-acct { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 8px 12px; border-top: 1px solid var(--wb-line-soft); font-size: 12.5px; }
+.wb-acct-name { min-width: 0; display: inline-flex; align-items: center; gap: 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-acct-meta { color: var(--wb-muted); font-variant-numeric: tabular-nums; font-size: 11.5px; }
+/* The balance is pushed to the right edge and set in the accent colour: it is the
+   number the row exists to say, and the actions follow it rather than the reverse. */
+.wb-acct-credits { margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+  min-width: 84px; justify-content: flex-end; }
+.wb-acct-credits .wb-credits-value { font-size: 15px; }
+.wb-acct-actions { display: inline-flex; align-items: center; gap: 6px; }
+.wb-acct-empty { padding: 10px 12px 4px; border-top: 1px solid var(--wb-line-soft);
+  font-size: 12.5px; color: var(--wb-muted); }
+.wb-pool-foot { display: flex; align-items: center; gap: 8px; padding: 8px 12px 10px;
+  border-top: 1px solid var(--wb-line-soft); }
+.wb-credits-value { font-size: 16.5px; font-weight: 650; color: var(--wb-accent-strong);
+  font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+/* A bare icon action: no box, just the glyph, tinted on hover. */
+.wb-icon-btn { font: inherit; font-size: 13px; line-height: 1; padding: 5px 7px; border-radius: 6px; cursor: pointer;  border: 0; background: transparent; color: var(--wb-muted); transition: background .15s, color .15s; }
+.wb-icon-btn:hover:not(:disabled) { background: var(--wb-accent-soft); color: var(--wb-accent-strong); }
+.wb-icon-btn:disabled { opacity: .4; cursor: not-allowed; }
+/* The link out to the official plans page: same quiet weight as the icon
+   actions beside it, but it needs words to say where it goes — kept tight so the
+   balance row still fits one line in a narrow panel. */
+.wb-link-btn { font: inherit; font-size: 11px; line-height: 1; padding: 4px 7px; border-radius: 6px;
+  cursor: pointer; border: 1px solid var(--wb-line-soft); background: transparent; color: var(--wb-muted);
+  white-space: nowrap; transition: background .15s, color .15s, border-color .15s; }
+.wb-link-btn:hover { background: var(--wb-accent-soft); color: var(--wb-accent-strong); border-color: transparent; }
+.wb-acct .wb-btn, .wb-pool-foot .wb-btn { display: inline-flex; align-items: center; justify-content: center;
+  box-sizing: border-box; padding: 4px 10px; font-size: 11.5px; min-height: 26px; white-space: nowrap; }
+
+/* tab strip: two equal halves, the selected one a tinted segment ------------- */
+.wb-tabs { display: flex; gap: 6px; padding: 8px 16px 0; border-bottom: 1px solid var(--wb-line-soft); }
+.wb-tab { font: inherit; font-size: 13px; flex: 1 1 0; justify-content: center;
+  display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px 9px;
+  cursor: pointer; border: 0; border-bottom: 2px solid transparent; border-radius: 9px 9px 0 0;
+  background: transparent; color: var(--wb-muted);
+  transition: color .15s, background .15s, border-color .15s; }
+.wb-tab:hover { background: var(--wb-surface-hover); color: var(--wb-text); }
+.wb-tab-on { background: var(--wb-accent-soft); color: var(--wb-accent-strong); border-bottom-color: var(--wb-accent); font-weight: 600; }
+.wb-tab-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.wb-tab-sub { font-size: 11.5px; font-weight: 400; color: var(--wb-muted); }
+.wb-tab-on .wb-tab-sub { color: var(--wb-accent-strong); opacity: .75; }
+
+/* actions ---------------------------------------------------------------
+   Every button reads as a control: a border, a faint fill, and a highlight on
+   hover — the plain, the toolbar and the danger variants differ only in tint. */
+.wb-btn { font: inherit; font-size: 12.5px; font-weight: 500; line-height: 1.2; padding: 7px 13px; border-radius: 8px;
+  cursor: pointer; border: 1px solid var(--wb-line); background: var(--wb-surface-hover); color: var(--wb-text);
+  transition: background .15s, border-color .15s, color .15s, opacity .15s; }
+.wb-btn:hover:not(:disabled) { background: var(--wb-accent-soft); border-color: var(--wb-accent); color: var(--wb-accent-strong); }
+.wb-btn:focus-visible { outline: 2px solid var(--wb-accent); outline-offset: 1px; }
+.wb-btn:disabled { opacity: .38; cursor: not-allowed; }
+.wb-btn-primary { border-color: var(--wb-accent); background: var(--wb-accent); color: #fff; }
+.wb-btn-primary:hover:not(:disabled) { background: var(--wb-accent-strong); border-color: var(--wb-accent-strong); color: #fff; }
+.wb-btn-ghost { background: transparent; color: var(--wb-muted); }
+.wb-btn-ghost:hover:not(:disabled) { background: var(--wb-accent-soft); color: var(--wb-accent-strong); }
+.wb-btn-danger { border-color: rgba(229,72,77,.35); background: rgba(229,72,77,.07); color: #e5484d; }
+.wb-btn-danger:hover:not(:disabled) { border-color: rgba(229,72,77,.6); background: rgba(229,72,77,.14); color: #e5484d; }
+
+/* banners --------------------------------------------------------------- */
+.wb-callout { margin: 0 16px 16px; padding: 12px 14px; border: 1px solid var(--wb-line); border-left: 3px solid var(--wb-accent);
+  background: var(--wb-accent-soft); border-radius: 10px; font-size: 12.5px; line-height: 1.7; color: var(--wb-muted); }
+.wb-callout-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.wb-callout code { flex: 1; min-width: 0; font-family: var(--wb-mono); font-size: 12px; color: var(--wb-text); word-break: break-all; }
+.wb-error { margin: 0 0 16px; padding: 11px 14px; border: 1px solid rgba(229,72,77,.4); border-radius: 10px;
+  background: rgba(229,72,77,.08); color: #e5484d; font-size: 12.5px; line-height: 1.65; }
+
+/* models ---------------------------------------------------------------- */
+.wb-section { border-top: 1px solid var(--wb-line-soft); }
+.wb-section-head { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; padding: 13px 16px 8px 26px; }
+.wb-section-title { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--wb-muted); }
+.wb-badge { font-size: 11.5px; line-height: 17px; padding: 0 7px; border-radius: 6px;
+  background: var(--wb-surface-hover); color: var(--wb-muted); font-variant-numeric: tabular-nums; }
+/* The summary numbers change as models are checked, so the strip that holds them
+   keeps one width and the button after it never moves. */
+.wb-availability { min-width: 178px; font-size: 12px; color: var(--wb-muted);
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* The right-hand pair sits together at the end of the row: the icon action takes
+   the free space, and its own padding is trimmed so the gap to the check button
+   reads like the gap between the two bulk buttons below. */
+.wb-section-head .wb-icon-btn { margin-left: auto; padding: 5px 4px; margin-right: -2px; }
+/* The check button swaps its label while working; a fixed box keeps the refresh
+   icon beside it from sliding. */
+.wb-section-head .wb-btn { min-width: 96px; justify-content: center; }
+.wb-tools { display: flex; align-items: center; gap: 8px; padding: 0 16px 12px; }
+.wb-head-right { margin-left: auto; }
+.wb-search { position: relative; display: flex; align-items: center; flex: 1 1 auto; min-width: 120px; }
+.wb-search input { font: inherit; font-size: 12.5px; width: 100%; padding: 6px 10px; border-radius: 8px;
+  border: 1px solid var(--wb-line); background: transparent; color: var(--wb-text); }
+.wb-search input::placeholder { color: var(--wb-muted); }
+.wb-search input:focus { outline: none; border-color: var(--wb-accent); }
+.wb-search input:disabled { opacity: .45; cursor: not-allowed; }
+/* legacy flat-list heading, superseded by the group cards */
+.wb-model-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-line); }
+.wb-models-body { max-height: 380px; overflow: auto; padding: 4px 16px 10px; scrollbar-width: thin;
+  /* Reserve the scrollbar's width always: without this the whole card narrows
+     the moment the list starts scrolling. */
+  scrollbar-gutter: stable;
+  scrollbar-color: var(--wb-line) transparent; }
+.wb-models-body::-webkit-scrollbar { width: 8px; }
+.wb-models-body::-webkit-scrollbar-thumb { background: var(--wb-line); border-radius: 8px; }
+.wb-models-body::-webkit-scrollbar-track { background: transparent; }
+.wb-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 16px 10px; }
+.wb-chip { font-family: var(--wb-mono); font-size: 11.5px; padding: 2px 9px; border-radius: 999px;
+  border: 1px solid rgba(18,191,160,.4); background: var(--wb-accent-soft); color: var(--wb-accent-strong); }
+/* Each group is a card of its own inside the model list card. */
+.wb-group-card { border: 1px solid var(--wb-line-soft); border-radius: 12px; overflow: hidden;
+  background: var(--wb-surface); }
+.wb-group-card + .wb-group-card { margin-top: 10px; }
+.wb-group-head { box-sizing: border-box; display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px 8px 10px; font-size: 12px; font-weight: 500; color: var(--wb-muted); cursor: pointer;
+  background: var(--wb-surface-hover); border-bottom: 1px solid var(--wb-line-soft); }
+.wb-group-head:hover { color: var(--wb-text); }
+.wb-group-count { font-size: 11px; line-height: 16px; padding: 0 6px; border-radius: 5px;
+  background: var(--wb-surface); color: var(--wb-muted); font-variant-numeric: tabular-nums; }
+/* One line per model, read left to right as caret · state · name · id · tags ·
+   rate · switch. The rate keeps a fixed width and the switch a fixed slot, so
+   every row lines up. */
+.wb-model-block + .wb-model-block { border-top: 1px solid var(--wb-line-soft); }
+.wb-model { box-sizing: border-box; display: flex; align-items: center; gap: 10px; min-height: 36px;
+  padding: 6px 12px 6px 10px; font-size: 13px; cursor: pointer; transition: background .12s; }
+.wb-model:hover { background: var(--wb-surface-hover); }
+.wb-model-block-open > .wb-model { background: var(--wb-surface-hover); }
+/* A drawn chevron: crisp at any zoom, and it matches the panel's icon weight. */
+.wb-caret { flex: none; width: 14px; height: 14px; display: inline-flex; align-items: center;
+  justify-content: center; color: var(--wb-muted); transition: transform .15s; }
+.wb-caret svg { width: 11px; height: 11px; display: block; }
+.wb-model-block-open > .wb-model .wb-caret,
+.wb-group-head[aria-expanded="true"] .wb-caret { transform: rotate(90deg); }
+.wb-model-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-line); }
+/* The name leads in a fixed-width column (so the ids line up under each other),
+   and the id trails as a quieter annotation in the mono face. */
+.wb-model-name { flex: none; width: 168px; font-size: 13px; font-weight: 500; color: var(--wb-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wb-model-rate { flex: none; min-width: 54px; text-align: right;
+  font-family: var(--wb-mono); font-size: 12px; font-variant-numeric: tabular-nums; color: var(--wb-text); }
+/* Tags inside the details: enums (modalities, levels, load) read better as tags. */
+.wb-tags { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+.wb-tag { display: inline-block; padding: 0 6px; border-radius: 5px; font-size: 11px; line-height: 17px;
+  background: var(--wb-surface-hover); color: var(--wb-text); }
+.wb-tag-accent { background: var(--wb-accent-soft); color: var(--wb-accent-strong); }
+/* A switched-off row dims its narrative parts — the name and the rate text — but not the
+   「免费」 chip: what a model costs is a fact about the model, not a consequence of the
+   switch, and dimming it reads as "unknown" at a glance. */
+.wb-model-off .wb-model-name { opacity: .45; }
+.wb-model-off .wb-model-rate > :not(.wb-tag-accent) { opacity: .45; }
+.wb-model-detail { padding: 12px 14px 14px 38px; border-top: 1px dashed var(--wb-line-soft);
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 48px; }
+.wb-detail { display: flex; gap: 10px; font-size: 12.5px; line-height: 1.65; min-width: 0; }
+.wb-detail-wide { grid-column: 1 / -1; }
+.wb-detail-label { flex: none; width: 74px; color: var(--wb-muted); white-space: nowrap; }
+.wb-detail-value { color: var(--wb-text); word-break: break-word; }
+/* The description reads as prose, so it is dimmer and wider than a field. */
+.wb-detail-wide .wb-detail-value { color: var(--wb-muted); line-height: 1.75; max-width: 76ch; }
+.wb-switch { flex: none; width: 30px; height: 17px; border-radius: 999px; padding: 0; cursor: pointer;
+  border: 1px solid var(--wb-line); background: transparent; position: relative; transition: background .15s, border-color .15s; }
+.wb-switch-knob { position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%;
+  background: var(--wb-muted); transition: transform .15s, background .15s; }
+.wb-switch-on { border-color: var(--wb-accent); background: var(--wb-accent-soft); }
+.wb-switch-on .wb-switch-knob { transform: translateX(13px); background: var(--wb-accent-strong); }
+.wb-switch:disabled { opacity: .4; cursor: not-allowed; }
+/* One tag style everywhere: availability, promotion, load, free, and the enums
+   inside a model's details all read as the same small pill.
+   Tone carries the meaning — neutral, accent, ok, warn, bad. */
+.wb-tag { display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px; border-radius: 999px;
+  font-size: 11px; line-height: 1.55; white-space: nowrap; background: var(--wb-surface-hover);
+  color: var(--wb-muted); font-weight: 500; }
+.wb-tag-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.wb-tag-accent { background: var(--wb-accent-soft); color: var(--wb-accent-strong); }
+.wb-tag-ok { background: rgba(63,164,91,.14); color: #3fa45b; }
+.wb-tag-warn { background: rgba(216,150,20,.15); color: #d89614; }
+.wb-tag-bad { background: rgba(229,72,77,.13); color: #e5484d; }
+/* The row's right-hand cluster: promotion, load, rate — one block, one baseline. */
+.wb-model-tail { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
+/* The load tag keeps one width in every state, so the cluster never shifts. */
+.wb-busy-column { min-width: 68px; justify-content: center; }
+.wb-skeleton-row { display: flex; align-items: center; gap: 10px; padding: 10px 16px; }
+.wb-skeleton { height: 9px; border-radius: 5px; background: var(--wb-surface-hover); animation: wb-pulse 1.4s ease-in-out infinite; }
+.wb-skeleton-a { width: 26%; }
+.wb-skeleton-b { width: 18%; }
+.wb-skeleton-c { width: 8%; margin-left: auto; }
+@keyframes wb-pulse { 0%, 100% { opacity: .45 } 50% { opacity: .9 } }
+.wb-empty { padding: 16px; text-align: center; font-size: 12.5px; color: var(--wb-muted); }
+/* A loading line breathes a little, and reads one step larger than the muted
+   captions around it so it is clearly a state, not a label. */
+.wb-loading { font-size: 14px; color: var(--wb-muted); animation: wb-pulse 1.6s ease-in-out infinite; }
+.wb-muted { color: var(--wb-muted); }
+`
+
+    /** The chevron every foldable row carries; it rotates through CSS. */
+    const Caret = () => h('span', { className: 'wb-caret', 'aria-hidden': 'true' },
+      h('svg', { viewBox: '0 0 12 12', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' },
+        h('path', { d: 'M4.5 2.5 L8 6 L4.5 9.5' })
+      )
+    )
+
+    /**
+     * The plugin's own artwork, served by the Host at `/workbuddy/icon-mask`.
+     *
+     * It is painted through a CSS mask rather than loaded as an image, so the
+     * mark takes the panel's accent colour and stays legible in either theme
+     * (the source file is a single-colour silhouette with the figure knocked out
+     * of its alpha channel).
+     */
+    function Logomark() {
+      return h('span', { className: 'wb-logo', 'aria-hidden': 'true' })
+    }
+
+    function statusColor(region) {
+      if (region.pending) return { color: 'var(--dsw-alias-state-warn-primary, #d89614)' }
+      if (region.loggedIn) return { color: 'var(--dsw-alias-state-success-primary, #3fa45b)' }
+      if (region.expiresAt > 0) return { color: 'var(--dsw-alias-state-error-primary, #e5484d)' }
+      return { color: 'var(--dsw-alias-state-idle-primary, #8a8f98)' }
+    }
+
+    const formatTime = (ms, fallback) => (typeof ms === 'number' && ms > 0 ? new Date(ms).toLocaleString() : fallback)
+    const formatCredits = (value) => (typeof value === 'number' && Number.isFinite(value) ? (Number.isInteger(value) ? String(value) : value.toFixed(2)) : '—')
+    /**
+     * `credits` arrives as the server writes it (`"x0.00 credits"`, `"x2.20"`);
+     * the official picker shows just the factor, so extract the number and put
+     * an `x` after it.
+     */
+    const formatRate = (credits) => {
+      if (typeof credits !== 'string') return null
+      const factor = /(\d+(?:\.\d+)?)/.exec(credits)
+      return factor === null ? credits : `${factor[1]}x`
+    }
+    /**
+     * The same factor as a number, for consumers that do arithmetic instead of printing.
+     * `null` when the catalog published no rate — the snapshot says "unknown", not "free".
+     */
+    /**
+     * A zero rate reads as 「免费」 rather than 「0.00x」: that is the panel's own
+     * vocabulary, and it is what the promotion block is advertising anyway.
+     */
+    const isFreeModel = (model) => {
+      if (typeof model.credits !== 'string') return false
+      const factor = /(\d+(?:\.\d+)?)/.exec(model.credits)
+      return factor !== null && Number.parseFloat(factor[1]) === 0
+    }
+
+    /**
+     * How a verdict reads in the list.
+     *
+     * Only three things are worth saying, and each maps to one colour:
+     *
+     * - `不可用` (red) — the gateway says the model id does not exist (`11102`).
+     * - `无权限` (orange) — it exists, but this account may not use it: either
+     *   the entitlement check refuses it (`11158`) or the request is judged an
+     *   unapproved channel (`11128`, "被拦截").
+     * - `未知` (grey) — anything else (upstream 5xx, credential trouble,
+     *   a refused request shape). No conclusion can be drawn, so none is claimed;
+     *   the raw detail stays in the tooltip.
+     *
+     * `ok` shows nothing, and an unprobed model shows nothing either, so the
+     * list stays quiet where there is nothing to report.
+     */
+    /** `/v2/chat/busy` level → the label shown in a model's details. */
+    const BUSY_LABEL = {
+      idle: 'busyIdle',
+      // The official client maps `normal` to the same label as `idle`; the two
+      // server levels are indistinguishable to a user.
+      normal: 'busyIdle',
+      busy: 'busyBusy',
+      congested: 'busyCongested'
+    }
+
+    /** Load tone: quiet green, loaded amber, congested red. */
+    const busyTone = (level) => {
+      if (level === 'idle' || level === 'normal') return 'wb-tag-ok'
+      if (level === 'busy') return 'wb-tag-warn'
+      if (level === 'congested') return 'wb-tag-bad'
+      return ''
+    }
+
+    /** The word shown for one `/v2/chat/busy` level; absent or unknown reads 未知. */
+    const busyLabel = (level, t) => (level === undefined || level === null || level === '' || level === 'unknown')
+      ? t('unknown')
+      : t(BUSY_LABEL[level] ?? 'busyUnknown')
+
+    /**
+     * The tooltip keeps the official phrasing, since the two-character labels
+     * (`繁忙` / `拥堵`) deliberately drop the degree that the colour carries.
+     */
+    const busyTitle = (level, t) => {
+      const official = level === 'busy' ? t('busyBusyOfficial')
+        : level === 'congested' ? t('busyCongestedOfficial')
+          : undefined
+      const label = busyLabel(level, t)
+      return official === undefined || official === label
+        ? `${t('detailBusy')}：${label}`
+        : `${t('detailBusy')}：${label}（${official}）`
+    }
+
+    /** One tag renderer, so availability, promotion, load and free all match. */
+    const tag = (text, tone = '', extra = {}) => h('span', {
+      className: `wb-tag${tone.length === 0 ? '' : ` ${tone}`}`,
+      ...extra
+    }, text)
+
+    /**
+     * The promotion's own tag: the deployment's label, tinted with the colour it
+     * ships. Used both in the row and for 「促销类型」 in the details — the same
+     * thing must not have two names.
+     */
+    const promotionTag = (promotion, t) => {
+      const label = typeof promotion.label === 'string' && promotion.label.length > 0
+        ? promotion.label
+        : (promotion.kind === 'discount' ? t('promoDiscount') : promotion.kind)
+      if (label === undefined) return null
+      return tag(label, '', {
+        title: promotion.text ?? label,
+        ...(typeof promotion.color === 'string' && promotion.color.length > 0
+          ? { style: { background: `${promotion.color}1f`, color: promotion.color } }
+          : {})
+      })
+    }
+
+    const AVAILABILITY_LABEL = {
+      dead: 'stateDead',
+      denied: 'stateDenied',
+      blocked: 'stateDenied',
+      // A rejected credential is a definite answer, not an unknown one: every model
+      // reported it, and the fix is a re-login rather than a retry.
+      auth: 'stateAuth',
+      // Both are verdicts with a cause worth naming: the account is out of credits, or its
+      // rate window is used up. Showing 未知 here is what made a throttled list look
+      // undecided.
+      noquota: 'stateNoQuota',
+      throttled: 'stateThrottled',
+      down: 'stateUnknown',
+      error: 'stateUnknown'
+    }
+    const availabilityChip = (entry, t) => {
+      const key = entry === null || entry === undefined ? undefined : AVAILABILITY_LABEL[entry.state]
+      if (key === undefined) return null
+      const tone = entry.state === 'dead' ? 'wb-tag-bad'
+        : ((entry.state === 'denied' || entry.state === 'blocked' || entry.state === 'auth' ||
+            entry.state === 'noquota' || entry.state === 'throttled') ? 'wb-tag-warn' : '')
+      return tag(t(key), tone, { key: 'state', title: availabilityTitle(entry, t) })
+    }
+
+    /** Dot color for a model's last verdict; unprobed models stay neutral. */
+    const availabilityColor = (entry) => {
+      if (entry === null || entry === undefined) return 'var(--wb-line)'
+      if (entry.state === 'dead') return 'var(--dsw-alias-state-error-primary, #e5484d)'
+      const warn = ['denied', 'blocked', 'busy', 'auth', 'noquota', 'throttled']
+      if (warn.includes(entry.state)) return 'var(--dsw-alias-state-warn-primary, #d89614)'
+      if (entry.state === 'ok') return 'var(--dsw-alias-state-success-primary, #3fa45b)'
+      // Grey: no conclusion was reached, so no alarm is raised either.
+      return 'var(--dsw-alias-state-idle-primary, #8a8f98)'
+    }
+
+    const availabilityTitle = (entry, t) => {
+      if (entry === null || entry === undefined) return undefined
+      const when = typeof entry.at === 'number' && entry.at > 0 ? ` · ${new Date(entry.at).toLocaleString()}` : ''
+      return `${entry.detail ?? ''}${when}`.trim() || undefined
+    }
+    /** Local calendar day, matching the Host's bookkeeping key for claims. */
+    const localDayKey = (now = new Date()) => {
+      const pad = (value) => String(value).padStart(2, '0')
+      return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+    }
+
+    async function request(path, options) {
+      const response = await fetch(`${API}${path}`, {
+        headers: { accept: 'application/json', ...(options?.body === undefined ? {} : { 'content-type': 'application/json' }) },
+        ...options
+      })
+      let json = {}
+      try {
+        json = await response.json()
+      } catch {
+        json = {}
+      }
+      if (!response.ok) throw new Error(json.error ?? `HTTP ${response.status}`)
+      return json
+    }
+
+    /**
+     * Verdicts that mean "this cannot be called right now", and so belong in the unusable
+     * group. Shared with the state service so a selector plugin grouping by the same rule
+     * never disagrees with what this panel shows.
+     *
+     * Wider than the host's `SUSPENDING_STATES` (`src/catalog/availability.js`) on purpose:
+     * that one decides what the sweep switches off, and it stays at `dead`/`denied` because
+     * an exhausted balance or a spent rate window is an answer about the account, not the
+     * model — suspending on those would take the whole pool out of the picker at once. Here
+     * the question is only which card a row is filed under.
+     */
+    const UNUSABLE_STATES = new Set(['dead', 'denied', 'blocked', 'auth', 'noquota', 'throttled'])
+    const isUnusable = (entry) => UNUSABLE_STATES.has(entry?.availability?.state)
+
+    /**
+     * The observable this plugin publishes for other client plugins.
+     *
+     * Name-scoped, because a selector plugin and this panel are separate bundles and a bare
+     * name would collide. Shaped like the host's own observables (`directory`, `locale`):
+     * `getSnapshot()` returns the *same* reference until something changes, which is what
+     * `useSyncExternalStore` requires, and `subscribe()` hands back an unsubscribe.
+     *
+     * Everything in a snapshot is JSON-serializable and never throws: a consumer reading it
+     * before the panel has loaded gets an empty map, not an exception.
+     */
+    const STATE_SERVICE = '@huai_xin/dsh-workbuddy/state'
+    const EMPTY_SNAPSHOT = Object.freeze({ version: 1, updatedAt: 0, providers: {} })
+
+    /**
+     * The published wording: fixed English, independent of the panel's locale.
+     *
+     * These were dictionary lookups at first, which meant the same model reported "限流" in a
+     * Chinese UI and "rate limited" in an English one — a consumer branching on the string
+     * would break the moment somebody switched language. The snapshot is a machine contract,
+     * so it says one thing always; the panel is free to translate its own labels.
+     *
+     * The mapping mirrors the chip table: the verdict is what the row would draw, and the
+     * states with no chip at all — a clean `ok`, a queue (`busy`), a model never probed —
+     * read `available`.
+     */
+    const SNAPSHOT_VERDICT = {
+      dead: 'unusable',
+      denied: 'no permission',
+      blocked: 'no permission',
+      auth: 'credentials rejected',
+      noquota: 'out of credits',
+      throttled: 'rate limited',
+      down: 'unknown',
+      error: 'unknown'
+    }
+    const SNAPSHOT_BUSY = { idle: 'idle', normal: 'idle', busy: 'busy', congested: 'congested' }
+
+    /** The verdict the row's chip would show, as a stable token. */
+    function verdictText(model) {
+      return SNAPSHOT_VERDICT[model?.availability?.state] ?? 'available'
+    }
+
+    /** The load label as a stable token; `unknown` when the deployment reports nothing. */
+    function busyText(level) {
+      if (typeof level !== 'string' || level.length === 0) return 'unknown'
+      return SNAPSHOT_BUSY[level] ?? 'unknown'
+    }
+
+    /** The rate as displayed ("0.11x"), or "free" / "unknown" — never a made-up number. */
+    function rateText(model) {
+      if (isFreeModel(model)) return 'free'
+      return formatRate(model.credits) ?? 'unknown'
+    }
+
+    /**
+     * Derive the published map.
+     *
+     * Only what a consumer would render: whether the deployment is signed in, its balance,
+     * and per **enabled** model the four strings a selector shows. Disabled models are left
+     * out — the user's switch is the answer to "should this appear in a picker", so a
+     * consumer filtering them again would only risk disagreeing with the panel.
+     *
+     * Field names and values are both English: this is a machine contract between two
+     * bundles, not something a user reads, and a key or a token that changes with the
+     * interface language would break the consumer on a locale switch.
+     */
+    function buildStateSnapshot(state, modelMap, busyLevels, now = Date.now()) {
+      const providers = {}
+      for (const region of state?.regions ?? []) {
+        if (typeof region?.provider !== 'string' || region.provider.length === 0) continue
+        const models = {}
+        for (const model of modelMap?.[region.id]?.list ?? []) {
+          if (model?.preset === true || typeof model?.id !== 'string') continue
+          if (model.enabled === false) continue
+          models[model.id] = {
+            name: model.name ?? model.id,
+            verdict: verdictText(model),
+            busy: busyText(busyLevels?.[region.id]?.[model.id]),
+            rate: rateText(model)
+          }
+        }
+        const credits = region.credits
+        providers[region.provider] = {
+          region: region.id,
+          provider: region.provider,
+          displayName: region.label ?? region.provider,
+          loggedIn: region.loggedIn === true,
+          pending: region.pending === true,
+          // Already the sum over this deployment's accounts — the number the panel's
+          // head row shows, so a consumer and the panel never disagree about a balance.
+          credits: typeof credits?.total === 'number' ? credits.total : null,
+          // How many accounts back this deployment. A consumer offering "switch account"
+          // needs the count; whether each one is callable is the panel's own row's business,
+          // and a second field saying it never had a reader.
+          accounts: (region.accounts ?? []).length,
+          models
+        }
+      }
+      return { version: 1, updatedAt: now, providers }
+    }
+
+    /** Accepts `cn`, `intl`, or a full provider id, and returns the deployment id. */
+    function regionIdOf(region) {
+      const value = String(region ?? '').trim()
+      if (value.length === 0) return undefined
+      for (const entry of PLACEHOLDER_REGIONS) {
+        if (entry.id === value || entry.provider === value) return entry.id
+      }
+      return undefined
+    }
+
+    /**
+     * The service object itself. Actions talk to the same host routes the panel uses, so a
+     * consumer never needs to know about `/workbuddy/*`; they return the host's answer and
+     * the panel picks the new state up on its next read.
+     */
+    function createStateService() {
+      let snapshot = EMPTY_SNAPSHOT
+      const listeners = new Set()
+      /** @type {Promise<void> | undefined} */
+      let inFlight
+      // The inputs of the last publication, kept so a model switch can be reflected without
+      // another round trip: the display fields (name, verdict, busy, rate) have not changed,
+      // only which ids are in the map.
+      let lastState
+      let lastModelMap
+      let lastBusyLevels
+
+      /**
+       * Read both deployments and publish.
+       *
+       * Every deployment, not just the one the panel happens to show: a selector lists
+       * models from both, so a snapshot with one side empty is worse than useless. Each
+       * deployment is read on its own (`/models`, and `/busy` only where it exists), so one
+       * failing side still publishes the other.
+       *
+       * Concurrent callers share the promise — the panel can fire this on every action
+       * while the timer is also running.
+       */
+      const load = async () => {
+        const state = await request('/state')
+        const modelMap = {}
+        const busyLevels = {}
+        await Promise.all((state?.regions ?? []).map(async (region) => {
+          if (typeof region?.id !== 'string') return
+          const [models, busy] = await Promise.all([
+            request(`/models?region=${encodeURIComponent(region.id)}`).catch(() => undefined),
+            region.hasBusy === true
+              ? request(`/busy?region=${encodeURIComponent(region.id)}`).catch(() => undefined)
+              : Promise.resolve(undefined)
+          ])
+          modelMap[region.id] = { list: models?.models ?? [] }
+          if (busy?.levels !== undefined) busyLevels[region.id] = busy.levels
+        }))
+        lastState = state
+        lastModelMap = modelMap
+        lastBusyLevels = busyLevels
+        service.publish(buildStateSnapshot(state, modelMap, busyLevels))
+      }
+
+      const service = {
+        getSnapshot: () => snapshot,
+        subscribe(listener) {
+          if (typeof listener !== 'function') return () => {}
+          listeners.add(listener)
+          return () => { listeners.delete(listener) }
+        },
+        /** @internal — only the loader and the panel's own actions publish. */
+        publish(next) {
+          snapshot = next
+          for (const listener of [...listeners]) {
+            // A consumer's bug must not break the panel it is decorating.
+            try { listener(snapshot) } catch { /* ignore */ }
+          }
+        },
+        /**
+         * Re-read both deployments. Resolves when the snapshot is published; rejects only
+         * if `/state` itself failed (the per-deployment reads are already tolerated).
+         */
+        refresh() {
+          if (inFlight !== undefined) return inFlight
+          const task = load().finally(() => { inFlight = undefined })
+          inFlight = task
+          return task
+        },
+        /**
+         * Reflect a model switch without re-reading anything.
+         *
+         * The published map only contains enabled models, so flipping one switch adds or
+         * removes an entry — but its display values are already known. Re-reading to learn
+         * that costs two upstream round trips per deployment and was felt as a hitch on
+         * every click. Falls back to a full refresh when nothing has been published yet.
+         */
+        patchEnabled(regionId, ids, enabled) {
+          if (lastModelMap?.[regionId]?.list === undefined) {
+            void this.refresh().catch(() => undefined)
+            return
+          }
+          const wanted = new Set(ids.map(String))
+          const list = lastModelMap[regionId].list.map((model) => (
+            wanted.has(String(model.id)) ? { ...model, enabled, decided: true } : model
+          ))
+          lastModelMap = { ...lastModelMap, [regionId]: { ...lastModelMap[regionId], list } }
+          this.publish(buildStateSnapshot(lastState, lastModelMap, lastBusyLevels))
+        },
+        async refreshCredits(region) {
+          const id = regionIdOf(region)
+          if (id === undefined) throw new Error(`unknown region: ${region}`)
+          const result = await request(`/credits?region=${encodeURIComponent(id)}`)
+          // The panel's own row is updated by the caller; the snapshot follows so the two
+          // never disagree about a balance.
+          void service.refresh().catch(() => undefined)
+          return result?.credits ?? null
+        },
+        async login(region) {
+          const id = regionIdOf(region)
+          if (id === undefined) throw new Error(`unknown region: ${region}`)
+          const result = await request('/login', { method: 'POST', body: JSON.stringify({ region: id }) })
+          void service.refresh().catch(() => undefined)
+          return result
+        },
+        async renew(region) {
+          const ids = region === undefined ? PLACEHOLDER_REGIONS.map((entry) => entry.id) : [regionIdOf(region)]
+          if (ids.some((id) => id === undefined)) throw new Error(`unknown region: ${region}`)
+          const results = []
+          for (const id of ids) {
+            results.push(await request('/refresh', { method: 'POST', body: JSON.stringify({ region: id }) }))
+          }
+          void service.refresh().catch(() => undefined)
+          return results
+        }
+      }
+      return service
+    }
+
+    const stateService = createStateService()
+
+    /**
+     * Which tab to open: the first signed-in deployment in display order — the
+     * mainland one comes first — so the panel opens on the same side the tab
+     * strip starts on and the tab never moves once `/state` answers.
+     */
+    function defaultTab(regions) {
+      const signedIn = regions.find((region) => region.loggedIn || region.pending)
+      return (signedIn ?? regions[0])?.id ?? 'cn'
+    }
+
+    /**
+     * Signed-out stand-ins: the card renders immediately with these while the
+     * first `/state` answer is in flight, so the panel never shows a bare
+     * "loading" page.
+     *
+     * The order must match the Host's (`REGION_IDS`): mainland first. A
+     * placeholder list in a different order made the tabs swap places the moment
+     * the real state arrived.
+     */
+    const PLACEHOLDER_REGIONS = [
+      { id: 'cn', provider: '@huai_xin/dsh-workbuddy/cn', endpoint: 'https://www.workbuddy.cn', loggedIn: false, pending: false, loginUrl: null, pendingSince: null, nickname: '', expiresAt: 0, refreshable: false, models: 0, credits: null, checkin: null, lastClaim: null },
+      { id: 'intl', provider: '@huai_xin/dsh-workbuddy/intl', endpoint: 'https://www.workbuddy.ai', loggedIn: false, pending: false, loginUrl: null, pendingSince: null, nickname: '', expiresAt: 0, refreshable: false, models: 0, credits: null, checkin: null, lastClaim: null }
+    ]
+
+    /**
+     * The accounts a deployment block shows.
+     *
+     * A host that predates account pools answers with the deployment's own
+     * `nickname`/`expiresAt`/`credits` and no `accounts` array — the panel must still
+     * render one row for it rather than an empty block, so the single account is
+     * synthesized from the same fields the row would have read anyway.
+     */
+    function accountsOf(entry) {
+      if (Array.isArray(entry?.accounts)) return entry.accounts
+      if (entry === undefined) return []
+      if (entry.loggedIn !== true && entry.expiresAt === 0 && entry.nickname === '') return []
+      return [{
+        id: 'primary',
+        nickname: entry.nickname ?? '',
+        loggedIn: entry.loggedIn === true,
+        hasToken: entry.loggedIn === true,
+        expiresAt: entry.expiresAt ?? 0,
+        refreshable: entry.refreshable === true,
+        pending: entry.pending === true,
+        credits: entry.credits ?? null,
+        checkin: entry.checkin ?? null,
+        lastClaim: entry.lastClaim ?? null
+      }]
+    }
+
+    function WorkBuddySettings({ t }) {
+      const [state, setState] = React.useState(null)
+      // The first paint already shows the deployment the panel settles on, so the
+      // tab does not jump from one side to the other once `/state` answers.
+      const [activeId, setActiveId] = React.useState('cn')
+      const [error, setError] = React.useState('')
+      const [busy, setBusy] = React.useState('')
+      const [loginUrls, setLoginUrls] = React.useState({})
+      const [copied, setCopied] = React.useState('')
+      const [modelMap, setModelMap] = React.useState({})
+      const [availability, setAvailability] = React.useState({})
+      /** Which account's balance is being re-read right now. */
+      const [creditBusy, setCreditBusy] = React.useState('')
+      /** Model rows whose details are unfolded, keyed `region:model`. */
+      const [expanded, setExpanded] = React.useState({})
+      /** Group cards the user folded, keyed `region:group`; unusable starts folded. */
+      const [folded, setFolded] = React.useState({})
+      /** Busy levels per deployment, from `/v2/chat/busy` where it exists. */
+      const [busyLevels, setBusyLevels] = React.useState({})
+      /** Per-deployment model filter text; keeps each tab's search separate. */
+      const [searches, setSearches] = React.useState({})
+      const poll = React.useRef(null)
+      const pinned = React.useRef(false)
+
+      const load = React.useCallback(async () => {
+        try {
+          const next = await request('/state')
+          setState(next)
+          setError('')
+          if (!pinned.current) setActiveId(defaultTab(next?.regions ?? []))
+          // An authorization link is only worth showing while that deployment is
+          // still waiting for one; once it is signed in the callout goes away
+          // without needing a manual refresh.
+          setLoginUrls((current) => {
+            const regions = next?.regions ?? []
+            const keep = Object.fromEntries(Object.entries(current)
+              .filter(([id]) => regions.some((entry) => entry.id === id && entry.pending === true)))
+            return Object.keys(keep).length === Object.keys(current).length ? current : keep
+          })
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+        }
+      }, [])
+
+      React.useEffect(() => {
+        void load()
+        return () => {
+          if (poll.current !== null) clearInterval(poll.current)
+          poll.current = null
+        }
+      }, [load])
+
+      const pending = state?.regions?.some((region) => region.pending) === true
+      React.useEffect(() => {
+        if (!pending) {
+          if (poll.current !== null) clearInterval(poll.current)
+          poll.current = null
+          return undefined
+        }
+        if (poll.current === null) poll.current = setInterval(() => void load(), 2000)
+        return () => {
+          if (poll.current !== null) clearInterval(poll.current)
+          poll.current = null
+        }
+      }, [pending, load])
+
+      const loading = state === null
+      const regions = state?.regions ?? PLACEHOLDER_REGIONS
+      const region = regions.find((entry) => entry.id === activeId) ?? regions[0]
+      const url = region === undefined ? undefined : loginUrls[region.id]
+
+      const modelMeta = (result) => ({
+        list: result.models ?? [],
+        source: result.source,
+        cachedAt: result.cachedAt,
+        officialImportedAt: result.officialImportedAt
+      })
+
+      // Opening the panel is a good moment to check what still answers: the host
+      // throttles it per deployment (China every 10 minutes, international daily),
+      // so a re-render never turns into a burst of probes.
+      const availabilityChecked = React.useRef({})
+      React.useEffect(() => {
+        const id = region?.id
+        if (id === undefined || region?.loggedIn !== true) return
+        if (availabilityChecked.current[id] === true) return
+        availabilityChecked.current[id] = true
+        void checkAvailability(id)
+        void refreshBusy(id)
+      }, [region?.id, region?.loggedIn])
+
+      // The active account's models load on demand and stay for the session.
+      const modelCount = region?.models ?? 0
+      React.useEffect(() => {
+        const id = region?.id
+        if (id === undefined || region?.loggedIn !== true) return
+        const cached = modelMap[id]
+        if (cached !== undefined && (cached.loading === true || cached.list?.length === modelCount)) return
+        setModelMap((current) => ({ ...current, [id]: { loading: true } }))
+        void request(`/models?region=${encodeURIComponent(id)}`)
+          .then((result) => setModelMap((current) => ({ ...current, [id]: modelMeta(result) })))
+          .catch((cause) => setModelMap((current) => ({ ...current, [id]: { error: cause instanceof Error ? cause.message : String(cause) } })))
+      }, [region?.id, region?.loggedIn, modelCount])
+
+      /**
+       * The panel no longer publishes the snapshot itself.
+       *
+       * It only ever loads the tab it is showing, so publishing from here meant the other
+       * deployment's models were always missing — and worse, only while this component was
+       * mounted at all. The plugin-level loader (`stateService.refresh()`, started from
+       * `apply`) owns the snapshot and reads both deployments; the panel just asks for a
+       * re-read after it changes something.
+       */
+      React.useEffect(() => {
+        void stateService.refresh().catch(() => undefined)
+      }, [])
+
+      // Actions that can change which models exist. Anything else (credits refresh,
+      // check-in, availability probe) must not drop the cached list: the models effect
+      // only re-runs when the region id, the login state or the model count changes, so
+      // clearing on an unrelated action left the table on its loading skeleton until the
+      // panel was reopened.
+      //
+      // `/enabled` is deliberately absent: flipping one switch does not change the list, and
+      // clearing it here re-fetched the catalog over a list that had not changed. The
+      // response to that request is applied in place instead (see below).
+      const CLEARS_MODELS = new Set(['/import', '/login', '/logout', '/models'])
+
+      const act = async (key, path, body) => {
+        setBusy(key)
+        setError('')
+        try {
+          const result = await request(path, { method: 'POST', body: JSON.stringify(body) })
+          if (typeof result?.url === 'string' && result.url.length > 0) {
+            setLoginUrls((current) => ({ ...current, [body.region]: result.url }))
+          }
+          if (body?.region !== undefined && CLEARS_MODELS.has(path)) setModelMap((current) => ({ ...current, [body.region]: undefined }))
+          if (path === '/enabled' && body?.reset !== true && Array.isArray(body?.ids)) {
+            // The switch only changed a boolean per id, and `/state` costs two upstream
+            // round trips per deployment (credits + check-in) — measured at 346 ms, felt as
+            // a hitch on every click. Patch the row we already have and tell the state
+            // service the same thing.
+            applyEnabledLocally(body.region, body.ids, body.enabled !== false)
+          } else {
+            await load()
+          }
+          // The host reports a failed write instead of throwing, so an unchecked
+          // `saved: false` reads as success and the user keeps a setting that was never
+          // stored.
+          if (result?.saved === false) {
+            setError(result.message ?? t('saveFailed'))
+            return undefined
+          }
+          // Signing out (or finishing a switch) makes any pending link stale, so
+          // the callout follows the state rather than lingering on screen.
+          if (body?.region !== undefined && path === '/logout') {
+            setLoginUrls((current) => {
+              const next = { ...current }
+              delete next[body.region]
+              return next
+            })
+          }
+          return result
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+          return undefined
+        } finally {
+          // Whatever happened — a login started, a name imported, credits re-read — the
+          // published snapshot is now stale, and a selector reading it has no other way to
+          // find out. A switch is the exception: it was patched in place above, and a full
+          // re-read costs two upstream round trips for nothing.
+          if (!(path === '/enabled' && body?.reset !== true)) {
+            void stateService.refresh().catch(() => undefined)
+          }
+          setBusy('')
+        }
+      }
+
+      const copy = async (regionId, value) => {
+        try {
+          await navigator.clipboard.writeText(value)
+          setCopied(regionId)
+          window.setTimeout(() => setCopied(''), 1500)
+        } catch {
+          setError(value)
+        }
+      }
+
+      /**
+       * Ask the Host to re-read the catalog (scoped → config → cache).
+       *
+       * The refresh is the one moment a user asks for current numbers, so it covers all
+       * three live columns: the catalog read brings fresh rates and promotions (they are
+       * deliberately never cached), and the busy levels are a separate route that would
+       * otherwise keep whatever it fetched when the panel opened.
+       */
+      const refreshModels = async (regionId) => {
+        // Keep the rows on screen while the new list loads: replacing them with a loading
+        // marker dropped `enabled` to its default, so every switch rendered as on and then
+        // flipped back when the answer arrived.
+        setModelMap((current) => ({ ...current, [regionId]: { ...current[regionId], loading: true } }))
+        try {
+          const result = await request(`/models?region=${encodeURIComponent(regionId)}&refresh=1`)
+          setModelMap((current) => ({ ...current, [regionId]: modelMeta(result) }))
+          await refreshBusy(regionId, true)
+          await load()
+        } catch (cause) {
+          setModelMap((current) => ({ ...current, [regionId]: { error: cause instanceof Error ? cause.message : String(cause) } }))
+        }
+      }
+
+      /**
+       * Ask the Host to probe the catalog for models that actually answer. The
+       * sweep can shrink the list (a probe that returns 11102 marks the model
+       * dead), so the rows are re-read afterwards.
+       */
+      /** Busy levels for one deployment; empty on the side that has no such route. */
+      const refreshBusy = async (regionId, fresh = false) => {
+        try {
+          // `refresh=1` drops the host's 50-second cache. Without it a check right after
+          // the panel opened would re-read the same stale levels.
+          const result = await request(`/busy?region=${encodeURIComponent(regionId)}${fresh ? '&refresh=1' : ''}`)
+          setBusyLevels((current) => ({ ...current, [regionId]: result.levels ?? {} }))
+        } catch {
+          // A missing route is not an error worth showing: the detail row simply
+          // stays absent.
+        }
+      }
+
+      const checkAvailability = async (regionId, manual = false) => {
+        setBusy(`availability:${regionId}`)
+        setError('')
+        try {
+          // The button asks for a sweep; opening the panel only lets the host
+          // decide (China runs it every time, the international one daily).
+          const result = await request(`/availability?region=${encodeURIComponent(regionId)}&refresh=1${manual ? '&manual=1' : ''}`)
+          setAvailability((current) => ({ ...current, [regionId]: { counts: result.counts ?? {}, total: result.total ?? 0, savedAt: result.savedAt ?? 0 } }))
+          const models = await request(`/models?region=${encodeURIComponent(regionId)}`)
+          setModelMap((current) => ({ ...current, [regionId]: modelMeta(models) }))
+          // Busy levels are a separate route and were only fetched when the login state
+          // changed, so a check — the moment a user expects fresh numbers — left them on
+          // 未知. They are cheap and cached for 50s on the host, so re-read them here too.
+          await refreshBusy(regionId, manual)
+          await load()
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+        } finally {
+          setBusy('')
+        }
+      }
+
+      /**
+       * Re-read one account's balance (or a whole deployment's, when no account is named).
+       *
+       * A named account answers with that account's own balance; the deployment-level
+       * call answers with the same payload the panel already shows for the row, so it is
+       * simply merged back into the region entry.
+       */
+      const refreshCredits = async (regionId, account) => {
+        const key = account === undefined ? regionId : `${regionId}:${account}`
+        setCreditBusy(key)
+        setError('')
+        try {
+          const query = account === undefined ? '' : `&account=${encodeURIComponent(account)}`
+          const result = await request(`/credits?region=${encodeURIComponent(regionId)}${query}`)
+          setState((current) => {
+            if (current === null) return current
+            const regions = current.regions.map((entry) => {
+              if (entry.id !== regionId) return entry
+              if (account === undefined) {
+                return { ...entry, credits: result.credits ?? null }
+              }
+              const accounts = (entry.accounts ?? []).map((row) => row.id === account ? { ...row, credits: result.credits ?? null } : row)
+              // The sum shown on the head row has to follow a single account's refresh,
+              // otherwise the number the user just re-read disagrees with its own total.
+              let total = 0
+              let known = 0
+              let daily = 0
+              for (const row of accounts) {
+                if (row.credits?.ok !== true || typeof row.credits.total !== 'number') continue
+                total += row.credits.total
+                known += 1
+                if (typeof row.credits.daily === 'number') daily += row.credits.daily
+              }
+              const credits = known === 0 ? null : { supported: true, ok: true, total: Math.round(total * 100) / 100, daily: Math.round(daily * 100) / 100, accounts: known }
+              return { ...entry, accounts, credits }
+            })
+            return { ...current, regions }
+          })
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+        } finally {
+          setCreditBusy('')
+        }
+      }
+
+      /**
+       * Open the deployment's official plans page in the user's browser.
+       *
+       * The host resolves the URL from its own allowlist, so the panel only ever
+       * names a page. When launching fails the reply still carries the URL and
+       * the panel shows it, rather than pretending nothing happened.
+       */
+      const openPlans = async (regionId) => {
+        setError('')
+        try {
+          const result = await request('/open', { method: 'POST', body: JSON.stringify({ region: regionId, page: 'plans' }) })
+          if (result.opened !== true && typeof result.url === 'string') {
+            setError(t('openPlansFailed')(result.url))
+          }
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+        }
+      }
+
+      const credits = region?.credits
+      const checkin = region?.checkin
+      const models = region === undefined ? undefined : modelMap[region.id]
+
+      // The status endpoint and the claim endpoint disagree while an activity
+      // is winding down (status says "not checked in", the claim answers
+      // 10001), so a claim recorded for today also counts as checked in.
+      const lastClaim = region?.lastClaim
+      const claimedToday = lastClaim !== null && lastClaim !== undefined &&
+        lastClaim.day === localDayKey() && (lastClaim.claimed === true || lastClaim.already === true)
+
+      const modelsLoading = region?.loggedIn === true && (models === undefined || models.loading === true)
+      const query = searches[region?.id ?? ''] ?? ''
+      const rows = (models?.list ?? []).filter((model) => {
+        if (query.length === 0) return true
+        const needle = query.toLowerCase()
+        return model.id.toLowerCase().includes(needle) ||
+          String(model.name ?? '').toLowerCase().includes(needle) ||
+          String(model.description ?? '').toLowerCase().includes(needle)
+      })
+      /**
+       * Grouped by "can this be called right now", not by "is this a real model".
+       *
+       * Nothing that just failed the probe belongs in 可用: a missing id, no permission, a
+       * blocked channel, a rejected credential, an exhausted balance and a used-up rate
+       * window all mean the same thing to the person looking at the list. They come back to
+       * 可用 when a later probe finds them answering — the verdicts expire on their own.
+       *
+       * Only genuinely undecided states (a 5xx, an unparsed body) stay in 可用 with a grey
+       * chip: nothing has been proven about them either way. The rule itself lives at module
+       * scope (`isUnusable`) so the published snapshot groups identically.
+       *
+       * Grouping is display-only: it decides which card a row sits in, not whether the model
+       * is offered — that is the switch alone (default off, see model-prefs.js).
+       */
+      const unusableState = (model) => isUnusable(model)
+      const presets = rows.filter((model) => model.preset === true)
+      // Everything the bulk buttons may act on: real models, not router presets.
+      const usableRows = rows.filter((model) => model.preset !== true)
+      // Listed by display name (falling back to the id), the way the official
+      // picker orders them, and carrying the busy level the deployment reports.
+      // The id breaks ties: `deepseek-v4.1-flash` and `deepseek-v4.1-flash-sg` share a
+      // display name, and without a second key their relative order followed whatever the
+      // catalog happened to return — the two rows swapped on every reload, which read as
+      // "the switch turned itself on and off".
+      const byName = (a, b) => String(a.name ?? a.id).localeCompare(String(b.name ?? b.id), 'zh-Hans-CN', { numeric: true })
+        || String(a.id).localeCompare(String(b.id))
+      // Both the level and whether this deployment even publishes one: the
+      // international build has no `/v2/chat/busy`, so it shows nothing at all
+      // there instead of a column of "未知".
+      const withBusy = (model) => ({
+        ...model,
+        busy: busyLevels[region?.id ?? '']?.[model.id],
+        busyKnown: region?.hasBusy === true
+      })
+      const usable = usableRows.filter((model) => !unusableState(model)).map(withBusy).sort(byName)
+      const unusable = usableRows.filter(unusableState).map(withBusy).sort(byName)
+
+      /** The pill beside the deployment name: one state, one word. */
+      const statusLabel = (entry) => {
+        if (entry.pending) return { text: t('statusPending'), token: 'var(--dsw-alias-state-warn-primary, #d89614)' }
+        if (entry.loggedIn) return { text: t('statusLoggedIn'), token: 'var(--dsw-alias-state-success-primary, #3fa45b)' }
+        if (entry.expiresAt > 0) return { text: t('statusExpired'), token: 'var(--dsw-alias-state-error-primary, #e5484d)' }
+        return { text: t('statusLoggedOut'), token: 'var(--dsw-alias-state-idle-primary, #8a8f98)' }
+      }
+
+      /**
+       * Flip one or more switches.
+       *
+       * The request is the whole job: it returns which ids were affected, and the row we
+       * already hold knows everything else about them. Re-reading `/models` and `/state`
+       * afterwards is what made a click feel sticky — `/state` alone costs two upstream round
+       * trips per deployment (credits and check-in, 346 ms measured) and answers a question
+       * no switch asks.
+       *
+       * `reset` is the exception: it clears the whole recorded set (everything off, which is
+       * the default), so the affected set is the whole list and only the host knows the
+       * outcome.
+       */
+      const setModelsEnabled = async (regionId, ids, enabled, reset = false) => {
+        if (ids.length === 0) return
+        setBusy(`enabled:${regionId}`)
+        setError('')
+        try {
+          const result = await request('/enabled', { method: 'POST', body: JSON.stringify({ region: regionId, ids, enabled, reset }) })
+          // The host reports a failed write instead of throwing; an unchecked `saved: false`
+          // reads as success and leaves the user holding a setting that was never stored.
+          if (result?.saved === false) {
+            setError(result.message ?? t('saveFailed'))
+            return
+          }
+          if (reset === true) {
+            const models = await request(`/models?region=${encodeURIComponent(regionId)}`)
+            setModelMap((current) => ({ ...current, [regionId]: modelMeta(models) }))
+            await load()
+            return
+          }
+          const wanted = new Set(ids.map(String))
+          setModelMap((current) => {
+            const entry = current[regionId]
+            if (entry?.list === undefined) return current
+            return {
+              ...current,
+              [regionId]: {
+                ...entry,
+                list: entry.list.map((model) => (wanted.has(String(model.id)) ? { ...model, enabled, decided: true } : model))
+              }
+            }
+          })
+          stateService.patchEnabled(regionId, ids, enabled)
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+        } finally {
+          setBusy('')
+        }
+      }
+
+      /** The per-row switch: on means the harness may offer this model. */
+      const enableSwitch = (model, regionId) => h('button', {
+        type: 'button',
+        role: 'switch',
+        'aria-checked': model.enabled !== false,
+        className: model.enabled === false ? 'wb-switch' : 'wb-switch wb-switch-on',
+        title: model.autoOff === true ? t('autoOffHint') : (model.enabled === false ? t('enableModel') : t('disableModel')),
+        disabled: busy === `enabled:${regionId}`,
+        onClick: (event) => {
+          event.stopPropagation()
+          void setModelsEnabled(regionId, [model.id], model.enabled === false)
+        }
+      }, h('span', { className: 'wb-switch-knob' }))
+
+      /**
+       * Everything the panel knows about one model, description first. Only
+       * fields that actually arrived are listed: a missing one is not shown as
+       * "unknown" here, because the row's own columns already say that. The
+       * availability verdict is deliberately absent — the dot beside the name is
+       * the whole story, and the raw text lives in its tooltip.
+       */
+      /** A small tag, used where the value is a short enum rather than prose. */
+      const detailTag = (text, tone = '') => tag(text, tone.trim())
+
+      const modelDetails = (model) => {
+        const rows = []
+        const add = (label, value, wide = false) => {
+          if (value === undefined || value === null || value === '') return
+          rows.push(h('div', { className: wide ? 'wb-detail wb-detail-wide' : 'wb-detail', key: label },
+            h('span', { className: 'wb-detail-label' }, label),
+            h('span', { className: 'wb-detail-value' }, value)
+          ))
+        }
+        /**
+         * Token counts, in the units people say out loud.
+         *
+         * The unit is chosen from how many digits the number has — four digits is a
+         * thousands figure, seven or more is millions — and the divided result is checked
+         * once more afterwards, because rounding can push it over the next unit:
+         * 999999 divides to 1000K, which is 1M, not "1000K".
+         *
+         * At most one decimal, and none when the figure is whole: 1.5M keeps its half,
+         * 192000 is "192K" rather than "192.0K". A trailing ".0" would claim a precision the
+         * catalog does not publish.
+         */
+        const formatTokens = (value) => {
+          if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined
+          const short = (number) => String(Number(number.toFixed(1)))
+          const digits = String(Math.trunc(value)).length
+          if (digits >= 7) return `${short(value / 1_000_000)}M`
+          if (digits >= 4) {
+            const thousands = Number((value / 1000).toFixed(1))
+            // Rounding can cross the unit: 999999 / 1000 is 1000K, which belongs in M.
+            if (thousands >= 1000) return `${short(value / 1_000_000)}M`
+            return `${short(value / 1000)}K`
+          }
+          return String(value)
+        }
+        const promotion = model.promotion
+        add(t('detailDescription'), model.description, true)
+        add(t('detailId'), model.id)
+        add(t('detailContext'), formatTokens(model.contextWindow))
+        add(t('detailMaxOutput'), formatTokens(model.maxTokens))
+        // Enum-ish values read better as tags than as a slash-joined string.
+        add(t('detailModality'), Array.isArray(model.input)
+          ? h('span', { className: 'wb-tags' }, model.input.map((modality) =>
+            detailTag(t(modality === 'image' ? 'modalityImage' : 'modalityText'), ' wb-tag-accent')))
+          : undefined)
+        add(t('detailEfforts'), model.efforts.length === 0
+          ? undefined
+          : h('span', { className: 'wb-tags' }, model.efforts.map((level) => detailTag(level))))
+        add(t('detailRate'), model.credits === undefined
+          ? t('unknown')
+          : (isFreeModel(model) ? detailTag(t('freeModel'), ' wb-tag-accent') : (formatRate(model.credits) ?? model.credits)))
+        // Busy sits with the live facts, above the promotion block. It is only
+        // meaningful where the deployment reports it; a level the service does not
+        // track reads 「未知」 rather than disappearing.
+        add(t('detailBusy'), model.busyKnown !== true
+          ? undefined
+          // Every load state — 「未知」 included — renders as the same tag in the
+          // same fixed-width column, so the row does not shift between states.
+          : h('span', {
+            className: `wb-tag wb-busy-column ${busyTone(model.busy)}`,
+            title: busyTitle(model.busy, t)
+          },
+          h('span', { className: 'wb-tag-dot' }),
+          busyLabel(model.busy, t)))
+        // The promotion is split into what it is, how long it lasts and what it
+        // says, because those three answer different questions. The kind shows
+        // the *same tag* the row does (`Free now` and friends), so the two never
+        // disagree about what the promotion is called.
+        add(t('detailPromoKind'), promotion === undefined ? undefined : promotionTag(promotion, t))
+        add(t('detailPromoWindow'), promotion === undefined
+          ? undefined
+          : [promotion.from, promotion.until]
+            .map((value) => (typeof value === 'string' ? formatTime(Date.parse(value), t('unknown')) : undefined))
+            .filter(Boolean).join(' → ') || undefined)
+        add(t('detailPromoText'), promotion?.text, true)
+        return h('div', { className: 'wb-model-detail' }, rows)
+      }
+
+      /**
+       * One model row.
+       *
+       * `compact` drops the promotion and busy tags. The unusable group uses it: those
+       * models cannot be called, so what they cost or how loaded they are is noise — and the
+       * row already carries a verdict chip, a rate and a switch, which is what overflowed.
+       * Both values remain in the expandable details.
+       */
+      const modelRow = (model, regionId, options = {}) => {
+        const compact = options.compact === true
+        const key = `${regionId}:${model.id}`
+        const open = expanded[key] === true
+        return h('div', { key: model.id, className: open ? 'wb-model-block wb-model-block-open' : 'wb-model-block' },
+          h('div', {
+            className: model.enabled === false ? 'wb-model wb-model-off' : 'wb-model',
+            role: 'button',
+            tabIndex: 0,
+            'aria-expanded': open,
+            title: model.description ?? model.id,
+            onClick: () => setExpanded((current) => ({ ...current, [key]: current[key] !== true })),
+            onKeyDown: (event) => {
+              if (event.key !== 'Enter' && event.key !== ' ') return
+              event.preventDefault()
+              setExpanded((current) => ({ ...current, [key]: current[key] !== true }))
+            }
+          },
+          h(Caret, null),
+          h('span', {
+            className: 'wb-model-dot',
+            style: { background: availabilityColor(model.availability) },
+            title: availabilityTitle(model.availability, t)
+          }),
+          h('span', { className: 'wb-model-name' }, model.name ?? model.id),
+          // The right-hand cluster reads as one block: what it costs (promotion),
+          // how loaded it is, the rate itself — then the switch, which is the only
+          // control in the row. A compact row keeps only the verdict and the rate.
+          h('span', { className: 'wb-model-tail' },
+            availabilityChip(model.availability, t),
+            (!compact && model.promotion !== undefined) ? promotionTag(model.promotion, t) : null,
+            (!compact && model.busyKnown === true)
+              ? tag([
+                h('span', { className: 'wb-tag-dot', key: 'dot' }),
+                busyLabel(model.busy, t)
+              ], `wb-busy-column ${busyTone(model.busy)}`, {
+                key: 'busy',
+                // The tooltip keeps the official phrasing (轻微拥堵 / 极度拥堵).
+                title: busyTitle(model.busy, t)
+              })
+              : null,
+            // A model the probe switched off says so, and it says it in the compact rows too:
+            // those live in the unusable group, which is exactly where a suspension is, and
+            // the row is otherwise identical to one the user turned off by hand.
+            (model.autoOff === true)
+              ? tag(t('autoOff'), 'wb-tag-warn', { key: 'auto-off', title: t('autoOffHint') })
+              : null,
+            h('span', { className: 'wb-model-rate', title: t('creditsRate') },
+              model.credits === undefined
+                ? h('span', { className: 'wb-muted' }, t('unknown'))
+                : (isFreeModel(model)
+                  ? tag(t('freeModel'), 'wb-tag-accent', { style: { fontFamily: 'inherit' } })
+                  : (formatRate(model.credits) ?? t('unknown'))))
+          ),
+          enableSwitch(model, regionId)
+          ),
+          open ? modelDetails(model) : null
+        )
+      }
+
+      /**
+       * A group is its own collapsible card inside the model card; bulk switching
+       * lives in the toolbar. The unusable group starts folded: it is the part
+       * that is usually not wanted.
+       */
+      const group = (label, list, key, regionId) => list.length === 0 ? null : (() => {
+        const foldKey = `${regionId}:${key}`
+        const collapsed = folded[foldKey] ?? (key === 'unusable')
+        return h('div', { className: 'wb-group-card', key },
+          h('div', {
+            className: 'wb-group-head',
+            role: 'button',
+            tabIndex: 0,
+            'aria-expanded': collapsed !== true,
+            onClick: () => setFolded((current) => ({ ...current, [foldKey]: current[foldKey] === undefined ? !(key === 'unusable') : !current[foldKey] })),
+            onKeyDown: (event) => {
+              if (event.key !== 'Enter' && event.key !== ' ') return
+              event.preventDefault()
+              setFolded((current) => ({ ...current, [foldKey]: current[foldKey] === undefined ? !(key === 'unusable') : !current[foldKey] }))
+            }
+          },
+          h(Caret, null),
+          h('span', null, label),
+          h('span', { className: 'wb-group-count' }, String(list.length))
+          ),
+          collapsed === true ? null : list.map((model) => modelRow(model, regionId, { compact: key === 'unusable' }))
+        )
+      })()
+
+      const skeleton = () => h('div', null, [0, 1, 2].map((index) => h('div', { key: index, className: 'wb-skeleton-row' },
+        h('span', { className: 'wb-skeleton wb-skeleton-a' }),
+        h('span', { className: 'wb-skeleton wb-skeleton-b' }),
+        h('span', { className: 'wb-skeleton wb-skeleton-c' })
+      )))
+
+      /**
+       * One account line inside a deployment's block.
+       *
+       * Reads left to right as account · … · balance · actions: the balance sits at the
+       * right edge next to the controls, in the accent colour, because it is the number
+       * the row exists to say. Its own re-read and 续期 stay per account — the sum on the
+       * head row is only meaningful when each addend can be refreshed.
+       *
+       * No 更换账号: adding an account and signing the old one out replaces it, and the
+       * slot-named re-authorization was a second way to do the same thing. No expiry
+       * either — the value is the token's own claim and the server retires tokens well
+       * before it, so it read as a promise the deployment does not keep.
+       */
+      const accountRow = (entry, regionId) => {
+        const key = `${regionId}:${entry.id}`
+        const creditsOk = entry.credits !== null && entry.credits !== undefined && entry.credits.ok === true
+        return h('div', { className: 'wb-acct', key },
+          h('span', { className: 'wb-acct-name', title: entry.id === 'primary' ? t('primaryAccountHint') : entry.id },
+            h('span', { className: 'wb-deploy-dot', style: { background: statusColor(entry).color } }),
+            entry.nickname.length > 0 ? entry.nickname : t('unknown')),
+          entry.loggedIn === false ? tag(t('statusLoggedOut'), 'wb-tag-warn') : null,
+          h('span', { className: 'wb-acct-credits', title: t('accountCredits') },
+            creditsOk
+              ? h('span', { className: 'wb-credits-value' }, formatCredits(entry.credits.total))
+              : h('span', { className: 'wb-muted' }, t('unknown'))),
+          h('span', { className: 'wb-acct-actions' },
+            h('button', {
+              key: 'refresh',
+              type: 'button',
+              className: 'wb-icon-btn',
+              title: t('refreshCredits'),
+              'aria-label': t('refreshCredits'),
+              disabled: creditBusy === key || entry.loggedIn !== true,
+              onClick: () => void refreshCredits(regionId, entry.id)
+            }, creditBusy === key ? '…' : '⟳'),
+            h('button', {
+              key: 'renew',
+              type: 'button',
+              className: 'wb-btn wb-btn-ghost',
+              title: t('renewAccountHint'),
+              disabled: busy === `refresh:${key}` || entry.loggedIn !== true,
+              onClick: () => void act(`refresh:${key}`, '/refresh', { region: regionId, account: entry.id }).then(load)
+            }, t('renewAccount')),
+            h('button', {
+              key: 'logout',
+              type: 'button',
+              className: 'wb-btn wb-btn-danger',
+              disabled: busy === `logout:${key}`,
+              onClick: () => void act(`logout:${key}`, '/logout', { region: regionId, account: entry.id }).then(load)
+            }, t('logout'))
+          )
+        )
+      }
+
+      /**
+       * One deployment: a head with its own dot, name, summed balance and bulk actions,
+       * then its accounts, then 添加账号.
+       *
+       * The balance is the sum over the accounts below it — that is the number the row
+       * has always shown, and with several accounts it is the only one that answers "how
+       * much is left here".
+       */
+      const poolBlock = (entry) => {
+        const status = statusLabel(entry)
+        const accounts = accountsOf(entry)
+        const credits = entry.credits
+        return h('div', { className: 'wb-pool-block', key: entry.id },
+          h('div', { className: 'wb-pool-head' },
+            h('span', { className: 'wb-pool-name', title: `${entry.provider} · ${entry.endpoint}` },
+              h('span', { className: 'wb-deploy-dot', style: { background: status.token }, title: status.text }),
+              t(entry.id === 'cn' ? 'regionCn' : 'regionIntl')),
+            // No account count: the rows below already say how many there are, and a
+            // number that duplicates what is on screen is one more thing to read.
+            // The label leads the figure here ("总积分 1234.50") because this number is a
+            // total, while the per-account rows show a bare figure beside their name.
+            h('span', { className: 'wb-pool-credits' },
+              h('span', { className: 'wb-acct-meta' }, t('totalCredits')),
+              credits !== null && credits !== undefined && credits.ok === true
+                ? h('span', { className: 'wb-credits-value', title: t('totalCreditsHint') }, formatCredits(credits.total))
+                : h('span', { className: 'wb-muted' }, t('unknown'))),
+            h('span', { className: 'wb-pool-actions' },
+              checkinButton(entry),
+              h('button', {
+                key: 'plans',
+                type: 'button',
+                className: 'wb-link-btn',
+                title: t('openPlansHint'),
+                onClick: () => void openPlans(entry.id)
+              }, t('openPlans')),
+              h('button', {
+                key: 'refresh-region',
+                type: 'button',
+                className: 'wb-icon-btn',
+                title: t('refreshCredits'),
+                'aria-label': t('refreshCredits'),
+                disabled: creditBusy === entry.id || entry.loggedIn !== true,
+                onClick: () => void refreshCredits(entry.id)
+              }, creditBusy === entry.id ? '…' : '⟳')
+            )
+          ),
+          accounts.length === 0
+            ? h('div', { className: 'wb-acct-empty' }, loading ? t('loading') : t('noAccounts'))
+            : accounts.map((account) => accountRow(account, entry.id)),
+          h('div', { className: 'wb-pool-foot' },
+            h('button', {
+              key: 'add',
+              type: 'button',
+              className: 'wb-btn wb-btn-primary',
+              disabled: busy === `login:${entry.id}:add`,
+              title: t('addAccountHint'),
+              onClick: () => void act(`login:${entry.id}:add`, '/login', { region: entry.id, add: true })
+            }, t('addAccount')),
+            entry.pending === true ? h('span', { className: 'wb-loading' }, t('loggingIn')) : null
+          )
+        )
+      }
+
+      /**
+       * The daily claim, once per deployment.
+       *
+       * Only the mainland deployment ships the endpoint, so the button exists there
+       * alone. With several accounts it claims for the one the deployment is currently
+       * using — a check-in credits one account, and the row already shows the sum.
+       */
+      const checkinButton = (entry) => {
+        const rowCheckin = entry.checkin
+        if (rowCheckin?.supported !== true || rowCheckin.ok !== true) return null
+        const claimedToday = entry.lastClaim !== null && entry.lastClaim !== undefined &&
+          entry.lastClaim.day === localDayKey() &&
+          (entry.lastClaim.claimed === true || entry.lastClaim.already === true)
+        const checkedIn = rowCheckin.todayCheckedIn === true || claimedToday
+        return h('button', {
+          key: 'checkin',
+          type: 'button',
+          className: 'wb-btn',
+          disabled: busy === `checkin:${entry.id}` || !entry.loggedIn || checkedIn || !rowCheckin.active,
+          // The automatic claim is the normal path, so its outcome lives in the
+          // tooltip rather than in a row of its own.
+          title: entry.lastClaim?.claimed === true
+            ? t('lastClaim')(formatTime(entry.lastClaim.at, t('unknown')), t('claimResult')(entry.lastClaim.credit ?? 0))
+            : undefined,
+          onClick: () => void act(`checkin:${entry.id}`, '/checkin', { region: entry.id })
+        }, busy === `checkin:${entry.id}` ? t('claiming') : (checkedIn ? t('checkedIn') : t('claim')))
+      }
+
+      /**
+       * Renew both deployments from one button in the card corner: the tokens are
+       * independent, so this is just the single-deployment refresh run per region,
+       * signed-in ones only.
+       */
+      const renewAll = async () => {
+        setBusy('renew:all')
+        setError('')
+        try {
+          for (const entry of regions) {
+            if (entry.loggedIn !== true) continue
+            await request('/refresh', { method: 'POST', body: JSON.stringify({ region: entry.id }) })
+          }
+          await load()
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+        } finally {
+          // Every other mutation publishes through `act()`, which refreshes the snapshot in
+          // its own `finally`. This button writes to the host directly, so without this the
+          // panel would show renewed tokens while a selector still read the old snapshot —
+          // until the five-minute timer happened to fire.
+          void stateService.refresh().catch(() => undefined)
+          setBusy('')
+        }
+      }
+
+      /** The pending sign-in link, shown inside the account card. */
+      const loginCallout = () => {
+        const pendingRegion = regions.find((entry) => loginUrls[entry.id] !== undefined || entry.pending)
+        if (pendingRegion === undefined) return null
+        // The host is the one that knows the link: it minted it and it is still polling for the
+        // token. The panel only knows it when it happened to see the reply, so a reload would
+        // otherwise leave this notice with no link and no way out.
+        const pendingUrl = loginUrls[pendingRegion.id] ?? pendingRegion.loginUrl ?? undefined
+        return h('div', { className: 'wb-callout' },
+          t('loginHint'),
+          pendingUrl === undefined ? null : h('div', { className: 'wb-callout-row' },
+            h('code', null, pendingUrl),
+            h('button', { type: 'button', className: 'wb-btn', onClick: () => void copy(pendingRegion.id, pendingUrl) },
+              copied === pendingRegion.id ? t('copied') : t('copy'))
+          ),
+          h('div', { className: 'wb-callout-row' },
+            h('button', {
+              type: 'button',
+              className: 'wb-btn wb-btn-ghost',
+              disabled: busy === `login-cancel:${pendingRegion.id}`,
+              onClick: () => void act(`login-cancel:${pendingRegion.id}`, '/login/cancel', { region: pendingRegion.id })
+            }, t('cancelLogin'))
+          )
+        )
+      }
+
+      return h('section', { className: 'wb-root', 'aria-label': t('title') },
+        h('style', null, CSS),
+        h('h2', { className: 'wb-title' }, t('title')),
+        h('p', { className: 'wb-intro' }, t('intro')),
+        error.length > 0 ? h('p', { className: 'wb-error', role: 'alert' }, error) : null,
+
+        // Cards are separate concerns: who is signed in, and what they can run.
+        h('div', { className: 'wb-card wb-account-card' },
+          h('div', { className: 'wb-card-head' },
+            h(Logomark, null),
+            h('span', { className: 'wb-card-title' }, t('cardAccounts')),
+            loading ? h('span', { className: 'wb-loading' }, t('loading')) : null,
+            // One renewal for both deployments, kept out of the per-account actions
+            // because it is never about just one of them.
+            h('div', { className: 'wb-head-right' },
+              h('button', {
+                type: 'button',
+                className: 'wb-btn',
+                disabled: busy === 'renew:all' || regions.every((entry) => entry.loggedIn !== true),
+                title: t('renewBothHint'),
+                onClick: () => void renewAll()
+              }, busy === 'renew:all' ? t('renewing') : t('renewBoth'))
+            )
+          ),
+          h('div', { className: 'wb-pool' }, regions.map((entry) => poolBlock(entry))),
+          loginCallout()
+        ),
+
+        region === undefined ? null : h('div', { className: 'wb-card' },
+          h('div', { className: 'wb-tabs', role: 'tablist' },
+            regions.map((entry) => h('button', {
+              key: entry.id,
+              type: 'button',
+              role: 'tab',
+              'aria-selected': entry.id === region.id,
+              className: entry.id === region.id ? 'wb-tab wb-tab-on' : 'wb-tab',
+              onClick: () => {
+                pinned.current = true
+                setActiveId(entry.id)
+              }
+            },
+            h('span', { className: 'wb-tab-dot', style: statusColor(entry) }),
+            t(entry.id === 'cn' ? 'regionCn' : 'regionIntl'),
+            // The tab names a DEPLOYMENT, and the list under it belongs to all of its accounts
+            // (a model is offered when any one of them can use it). Naming the first account
+            // there read as "these are that account's models", so the subtitle counts them.
+            accountsOf(entry).length > 0
+              ? h('span', { className: 'wb-tab-sub' }, t('accountCount')(accountsOf(entry).length))
+              : null
+            ))
+          ),
+          // Two rows: what this list is, then the tools that act on it. Every
+          // control is always present — signed out or still loading they show
+          // zeros and sit disabled, so the card keeps its shape instead of
+          // growing a toolbar once the models arrive.
+          h('div', { className: 'wb-section-head' },
+            h('span', { className: 'wb-section-title' }, t('models')),
+            h('span', { className: 'wb-badge' }, t('count')(region.models ?? 0)),
+            models?.source === 'none'
+              ? h('span', { className: 'wb-muted' }, t('catalogUnavailable'))
+              : models?.source === 'cache'
+                ? h('span', { className: 'wb-muted' }, `${t('catalogCache')}${models.cachedAt ? ` ${formatTime(models.cachedAt, '')}` : ''}`)
+                : null,
+            h('span', { className: 'wb-availability' },
+              t('availabilityResult')(availability[region.id]?.counts?.ok ?? 0, availability[region.id]?.counts?.dead ?? 0)),
+            h('button', {
+              key: 'refresh-list',
+              type: 'button',
+              className: 'wb-icon-btn',
+              title: t('refreshList'),
+              'aria-label': t('refreshList'),
+              disabled: models?.loading === true || region.loggedIn !== true,
+              onClick: () => void refreshModels(region.id)
+            }, models?.loading === true ? '…' : '⟳'),
+            h('button', {
+              key: 'check-availability',
+              type: 'button',
+              className: 'wb-btn wb-btn-ghost',
+              disabled: busy === `availability:${region.id}` || region.loggedIn !== true,
+              onClick: () => void checkAvailability(region.id, true),
+              title: t('availabilityHint')
+            }, busy === `availability:${region.id}` ? t('checking') : t('checkAvailability'))
+          ),
+          h('div', { className: 'wb-tools' },
+            h('span', { className: 'wb-search' },
+              h('input', {
+                type: 'search',
+                value: query,
+                placeholder: t('search'),
+                'aria-label': t('search'),
+                // Keyed on what the region *has*, not on what the query matched: with
+                // the filtered list a zero-match search disabled its own input and the
+                // only way out was closing the panel.
+                disabled: (models?.list ?? []).length === 0,
+                onChange: (event) => setSearches((current) => ({ ...current, [region.id]: event.target.value }))
+              })),
+            h('button', {
+              key: 'enable-all',
+              type: 'button',
+              className: 'wb-btn wb-btn-ghost',
+              // Only the usable group: offering a model whose last probe failed is the
+              // user's call, not something a bulk button should decide.
+              disabled: busy === `enabled:${region.id}` || usable.length === 0,
+              title: t('enableAllHint'),
+              onClick: () => void setModelsEnabled(region.id, usable.map((model) => model.id), true)
+            }, t('enableAll')),
+            h('button', {
+              key: 'disable-all',
+              type: 'button',
+              className: 'wb-btn wb-btn-ghost',
+              // Every row, not just the usable group. Turning something off is always safe,
+              // and the model that just got relabelled into 不可用 is exactly the one a user
+              // wants out of the picker — being told to find it in another group and flip it
+              // one row at a time is the chore this button exists to remove.
+              disabled: busy === `enabled:${region.id}` || usableRows.length === 0,
+              title: t('disableAllHint'),
+              onClick: () => void setModelsEnabled(region.id, usableRows.map((model) => model.id), false)
+            }, t('disableAll'))
+          ),
+          region.loggedIn !== true
+            ? h('div', { className: 'wb-empty' }, t('noModels'))
+            : modelsLoading
+              ? skeleton()
+              : models?.error !== undefined
+                ? h('div', { className: 'wb-error', style: { margin: '0 16px 16px' } }, models.error)
+                : (models?.list ?? []).length === 0
+                  ? h('div', { className: 'wb-empty' }, models?.source === 'none' ? t('catalogUnavailable') : t('emptyModels'))
+                  : rows.length === 0
+                    ? h('div', { className: 'wb-empty' }, t('noMatch')(query))
+                    : h('div', { className: 'wb-models-body' },
+                      presets.length === 0 ? null : h('div', { className: 'wb-chips' },
+                        presets.map((model) => h('span', { key: model.id, className: 'wb-chip', title: model.name ?? model.id }, model.id))),
+                      group(t('groupUsable'), usable, 'usable', region.id),
+                      group(t('groupUnusable'), unusable, 'unusable', region.id)
+                    )
+        )
+      )
+    }
+
+    return {
+      inject: ['slots'],
+      apply(ctx) {
+        // A throwing apply() would leave the slot silently empty, so every
+        // optional client service is probed and the whole registration is
+        // contained; a failure is reported to the host log via the beacon.
+        try {
+          const get = typeof ctx.get === 'function' ? ctx.get.bind(ctx) : () => undefined
+          const locale = get('locale')
+          /**
+           * Translate through the host's locale service, but never let a missing
+           * key leak into the UI.
+           *
+           * The service keeps the dictionary it was first given, so a hot-reloaded
+           * client asking for a key added since then gets the key itself back
+           * (which is how `renewBoth` once appeared as a button label). Falling
+           * back to this bundle's own copy keeps new strings working without an
+           * app restart.
+           */
+          const localise = (localeId, key) => {
+            const value = dictFor(localeId)[key]
+            return typeof value === 'function' ? value : value
+          }
+          const boundT = locale !== undefined && typeof locale.bind === 'function' ? locale.bind('workbuddy') : null
+          const currentLocale = locale !== undefined && typeof locale.getLocale === 'function'
+            ? String(locale.getLocale().locale ?? 'zh-CN')
+            : 'zh-CN'
+          // Keys holding a function (those taking arguments) are returned as the
+          // function, exactly as the locale service returns them, so callers keep
+          // using `t('count')(7)`.
+          const t = (key) => {
+            if (boundT !== null) {
+              const fromService = boundT(key)
+              if (fromService !== undefined && fromService !== key) return fromService
+            }
+            const local = localise(currentLocale, key)
+            return local === undefined ? key : local
+          }
+
+          if (locale !== undefined && typeof locale.register === 'function' && typeof locale.getLocale === 'function') {
+            const registered = []
+            for (const entry of locale.getLocale().locales) {
+              registered.push(locale.register('workbuddy', entry.id, dictFor(entry.id)))
+            }
+            if (typeof ctx.effect === 'function') {
+              ctx.effect(() => () => {
+                for (const dispose of registered) dispose()
+              }, 'dsh-workbuddy: locale dictionaries')
+            }
+          }
+
+          ctx.slots.inject('settings.section', () => ctx.slots.register({
+            name: 'settings.section',
+            id: 'workbuddy',
+            order: 16,
+            label: () => t('section')
+          }, (props) => h(WorkBuddySettings, { ...props, t })))
+
+          // Optional integration surface for a selector-style plugin: the enabled models,
+          // their busy level and rate, plus the account's login state and balance, with
+          // actions for the two things a selector may want to offer (refresh, renew).
+          //
+          // Provided rather than injected: nobody has to know about it, and a composition
+          // without this plugin's panel is unaffected. A consumer reaches it with
+          // `ctx.get('@huai_xin/dsh-workbuddy/state')` or by listing it in its `inject`.
+          if (typeof ctx.provide === 'function') {
+            try {
+              ctx.provide(STATE_SERVICE, stateService)
+              report('state-service-provided')
+
+              // Load without waiting for the panel to be opened: a selector reads this the
+              // moment it mounts, and "open settings once" is not something a consumer can
+              // demand of a user. Delayed so plugin load stays free of network I/O, then
+              // refreshed on a timer because a balance and a busy level go stale on their
+              // own — and after any action, which the panel triggers itself.
+              const first = setTimeout(() => { void stateService.refresh().catch(() => undefined) }, 2_000)
+              const interval = setInterval(() => { void stateService.refresh().catch(() => undefined) }, 5 * 60_000)
+              // `unref` does not exist in a browser and does in Node, where the test suite
+              // runs this bundle: without it the process never exits, because a pending
+              // interval keeps the event loop alive.
+              first.unref?.()
+              interval.unref?.()
+              if (typeof ctx.effect === 'function') {
+                ctx.effect(() => () => {
+                  clearTimeout(first)
+                  clearInterval(interval)
+                }, 'dsh-workbuddy: state service refresh')
+              }
+            } catch (failure) {
+              // An older host without services: the panel works, the integration does not.
+              report(`state-service-failed: ${failure instanceof Error ? failure.message : String(failure)}`)
+            }
+          }
+          report('applied')
+        } catch (failure) {
+          report(`apply-failed: ${failure instanceof Error ? failure.message : String(failure)}`)
+        }
+      }
+    }
+  }
+})
