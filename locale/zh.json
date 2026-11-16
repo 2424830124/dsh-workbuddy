@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "WorkBuddy 模型",
+    "description": "接入 WorkBuddy 模型网关的国际版（workbuddy.ai）与国内版（workbuddy.cn），提供内置登录命令与令牌续期。"
+  }
+}

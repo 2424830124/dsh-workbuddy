@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "WorkBuddy Models",
+    "description": "Connects the WorkBuddy model gateway in both its international (workbuddy.ai) and China (workbuddy.cn) deployments, with an in-app login command and token refresh."
+  }
+}
