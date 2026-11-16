@@ -68,6 +68,17 @@ assert.equal(parsed[2].defaultEffort, undefined)
 // apart from concrete models.
 assert.equal(parsed[0].preset, true, 'default-model is a preset')
 assert.equal(parsed[1].preset, false, 'hy3 is a concrete model')
+// `isDefault` means "the default model", not "a router preset": both deployments
+// mark the concrete hy4flash / hy4flash-free that way, and reading it as a preset
+// signal silently dropped the free flagship from the picker (2026-11-16).
+const defaultFlagged = parseModelsFromConfig({
+  code: 0,
+  data: { agents: [{ name: 'cli', models: ['hy4flash-free', 'hy4flash'] }], models: [
+    { id: 'hy4flash-free', name: 'Hy4 flash', isDefault: true, credits: 'x0.00', maxOutputTokens: 64000 },
+    { id: 'hy4flash', name: 'Hy4 flash', isDefault: true, credits: 'x0.03', maxOutputTokens: 64000 }
+  ] }
+})
+assert.deepEqual(defaultFlagged.map((entry) => entry.preset), [false, false], 'isDefault marks the default, not a preset')
 // Two sources can disagree in a way that breaks the default↔levels pair: the
 // scoped block for `glm-5.2` declares `{"effort":"medium"}` with no list while
 // the deployment config declares `"high"` over `["high","xhigh"]`. Merging must

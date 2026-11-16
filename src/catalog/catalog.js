@@ -89,7 +89,13 @@ export function keepModel(entry) {
  * Router presets rather than concrete models: the picker lists them apart
  * because "Auto / Fast / Balanced / Primary / Deep" choose a backend at
  * request time and bill at a variable rate. Neither payload marks them, so the
- * known alias ids plus `isDefault` are the whole signal.
+ * known alias ids are the whole signal.
+ *
+ * `isDefault` is **not** part of it. It means "the default model", not "a
+ * preset": both deployments set it on `hy4flash-free` and `hy4flash` (China
+ * additionally on `fast-model`), so treating it as a preset signal silently
+ * dropped the flagship free tier from the picker (2026-11-16). The presets
+ * above are all naming-visible, so the id set is enough.
  */
 const PRESET_MODEL_IDS = new Set([
   'auto',
@@ -101,7 +107,7 @@ const PRESET_MODEL_IDS = new Set([
   'deep-model'
 ])
 
-const isPresetModel = (id, meta) => PRESET_MODEL_IDS.has(id) || meta?.isDefault === true
+const isPresetModel = (id) => PRESET_MODEL_IDS.has(id)
 
 /**
  * Reasoning levels in increasing depth. The server never sends them sorted, and
@@ -208,7 +214,7 @@ export function entryFromMeta(id, meta) {
     // `/v3/config` publishes which tier a model needs; that is a free, static
     // entitlement signal (see `account-info.js`), so it is carried along.
     ...(typeof meta?.requiredUserType === 'string' && meta.requiredUserType.length > 0 ? { requiredUserType: meta.requiredUserType } : {}),
-    preset: isPresetModel(id, meta)
+    preset: isPresetModel(id)
   }
   // A single-source entry can carry a default without a list (`glm-5.2` on the
   // scoped payload) — normalise here so no consumer ever sees a mismatch.
