@@ -52,6 +52,17 @@ const walk = (dir) => {
 walk('')
 
 /**
+ * Git-ignored paths never reach a published commit, so their contents are out of
+ * scope for the working-tree scan — otherwise this machine's scratch space (the
+ * harness memory log, a local token) reports as a leak every single run and the
+ * one answer that matters, "would publishing now leak something", gets lost.
+ * They are still listed further down when they are sensitive files.
+ */
+const ignoredPaths = git('ls-files', '--others', '--ignored', '--exclude-standard', '--directory')
+  .split('\n').filter((line) => line.length > 0).map((line) => line.replace(/\\/g, '/'))
+const isIgnored = (file) => ignoredPaths.some((entry) => entry.endsWith('/') ? file.startsWith(entry) : file === entry)
+
+/**
  * The maintainer's GitHub login and npm scope are public and must appear in
  * repository URLs and install commands; only the same strings in any *other*
  * context are leaks. Kept as one place so both scans agree.
@@ -63,6 +74,7 @@ const isAllowed = (line) => allowedContext.test(line)
 const treeHits = []
 for (const file of files) {
   if (/\.(png|webp|jpg|jpeg|gif|ico|tgz)$/i.test(file)) continue
+  if (isIgnored(file)) continue
   const text = readFileSync(join(root, file), 'utf8')
   text.split('\n').forEach((line, index) => {
     if (isAllowed(line)) return

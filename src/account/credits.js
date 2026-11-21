@@ -18,9 +18,10 @@
  * works.
  */
 
-import { freshToken, readMeta, usableSlot } from './auth.js'
+import { accountOf, freshToken, readMeta, slotKey, usableSlot } from './auth.js'
 import { localDayKey, requestJson, responseCode, responseMessage } from '../core/http.js'
 import { REGIONS } from '../core/regions.js'
+import { accountSlots } from './pool.js'
 import { setCredential } from '../core/paths.js'
 
 const USER_RESOURCE_PATH = '/v2/billing/meter/get-user-resource'
@@ -206,23 +207,33 @@ async function rememberClaim(ctx, region, outcome) {
 /**
  * Run one automatic claim pass over both deployments, remembering the outcome
  * on each account so the panel can show when it last ran.
+ *
+ * The check-in is per account, so this walks the pool instead of handing the bare
+ * region to `claimDailyCheckin`: that function resolves a region-shaped argument
+ * through `usableSlot`, which answers with exactly one slot (the primary account, or
+ * the first one that still holds a token). Looping over deployments therefore claimed
+ * for a single account and left every other one unclaimed — silently, because the
+ * request itself succeeded.
  */
 export async function runAutoClaim(ctx, reason) {
   const outcomes = []
   for (const id of Object.keys(REGIONS)) {
     const region = REGIONS[id]
     if (CHECKIN_SUPPORTED[region.id] !== true) continue
-    try {
-      const outcome = await claimDailyCheckin(ctx, region)
-      await rememberClaim(ctx, region, { reason, ...outcome })
-      if (outcome.claimed) {
-        ctx.logger.info(`[workbuddy] ${region.id}: 自动签到成功，获得 ${outcome.credit ?? 0} 积分（${reason}）`)
-      } else if (outcome.already !== true && outcome.reason !== '未登录') {
-        ctx.logger.warn(`[workbuddy] ${region.id}: 自动签到未完成 — ${outcome.reason}`)
+    for (const slot of accountSlots(region)) {
+      const key = slotKey(slot)
+      try {
+        const outcome = await claimDailyCheckin(ctx, slot)
+        await rememberClaim(ctx, slot, { reason, ...outcome })
+        if (outcome.claimed) {
+          ctx.logger.info(`[workbuddy] ${key}: 自动签到成功，获得 ${outcome.credit ?? 0} 积分（${reason}）`)
+        } else if (outcome.already !== true && outcome.reason !== '未登录') {
+          ctx.logger.warn(`[workbuddy] ${key}: 自动签到未完成 — ${outcome.reason}`)
+        }
+        outcomes.push({ region: region.id, account: accountOf(slot), ...outcome })
+      } catch (error) {
+        ctx.logger.warn(`[workbuddy] ${key}: 自动签到异常 — ${error instanceof Error ? error.message : String(error)}`)
       }
-      outcomes.push({ region: region.id, ...outcome })
-    } catch (error) {
-      ctx.logger.warn(`[workbuddy] ${region.id}: 自动签到异常 — ${error instanceof Error ? error.message : String(error)}`)
     }
   }
   return outcomes
