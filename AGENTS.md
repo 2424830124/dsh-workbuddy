@@ -165,7 +165,7 @@ src/
   panel/
     api.js          面板用的宿主路由 /workbuddy/*
 client/index.js     设置面板（`settings.section` 槽位的客户端半边；同时 provide 状态服务）
-test/unit/          离线单测（`npm test`，16 个）
+test/unit/          离线单测（`npm test`，17 个）
 test/live/          需要真实账号的在线探针与诊断脚本
 ```
 
@@ -311,7 +311,7 @@ test/live/          需要真实账号的在线探针与诊断脚本
   渲染断言覆盖到（它用一个小号 React **真的渲染**面板，缺 helper / 缺词典键会当场报错）。
 - 面板外观改动后跑 `node test/live/ui-preview.mjs` 并用截图对比（输出在 `%TEMP%`）。
 
-### 16 个离线单测各管什么
+### 17 个离线单测各管什么
 
 ```sh
 npm test                          # 全部
@@ -330,6 +330,7 @@ node test/unit/availability.mjs   # 探测分类、dead 有效期、按 id 合�
 node test/unit/auth.mjs           # 退出删凭据、陈旧续期/登录结果不写回
 node test/unit/logout.mjs         # 退出隐藏全部模型、但启用集合保留，登录后照旧
 node test/unit/pool.mjs           # 账号池：零迁移的主账号、追加顺序、按账号凭据、回退规则、旧版 id 复原与去重
+node test/unit/credits.mjs        # 自动签到按账号逐个签、各用各的令牌、各记各的 checkin
 node test/unit/adapter.mjs        # 提示词改写、请求体组装、聊天路由顺序、排队错误映射
 ```
 
@@ -520,17 +521,17 @@ Tokens prefixed with @ are paths the user explicitly referenced. Relative paths 
 
 ## 发布到 GitHub
 
-本地 `main` 的早期提交里曾经含有真实账号事实（fixture 与示例），所以**不要直接推 `main`**。
-发布用一份单提交的干净历史：
+**本地只有一个 `main` 分支，它就是公开历史。** 早期那条开发线的提交里含过真实账号事实
+（fixture 与示例），所以整条历史被丢掉了：`main` 从一个没有历史包袱的提交重建，之后照常在上面
+开发、提交、推送。
+
+旧分支（`main` / `main-private`）已经删除，本地只留 `main`。它们只会在 `git reflog` 里
+短暂残留，等 reflog 过期就彻底没了 —— **不要再把它们捡回来**，那正是扫不过的那条历史。
 
 ```sh
-node test/live/leak-scan.mjs                 # 工作区必须干净
-git checkout --orphan public && git add -A
-git commit -m "dsh-workbuddy: <一句话>"
-git checkout main                            # 保留本地完整历史
-node test/live/leak-scan.mjs public          # 只扫发布分支：历史必须 0 命中
-git push -u origin public:main               # 远端 main 由这份干净历史建立
+node test/live/leak-scan.mjs        # 工作区必须干净，历史必须 0 命中
+git push origin main
 ```
 
-之后继续在 `main` 上开发、发布时重建 `public`；或者干脆把 `main` 重置到干净历史上
-（`git checkout main && git reset --hard public`），让唯一的本地历史就是公开历史。
+规矩没变：**提交前扫一遍，历史必须 0 命中**。那条旧开发线之所以被丢掉，就是因为它扫不过。
+真要重建一份全新历史，才用孤儿分支（`git checkout --orphan main && git add -A`），重建完再扫一次。
